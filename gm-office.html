@@ -964,8 +964,12 @@ const lunchTime = w => world.hour >= w.lunch && world.hour < w.lunch + w.lunchLe
 // weekday guess. Same seed, so a higher count just brings in more of the same people, and they come in right away
 // rather than at their usual time (the scan saw them). The product seat is always one of them. An afternoon count (pm: the
 // lowest after 2 pm, posted until that laptop's owner leaves) winds the day down: see windDown_.
+// Vacations (Eastern dates, from and back are 'y-m-d'): those roles stay home from `from` until the day before `back`.
+const AWAY = [{ roles: ['ceo', 'coo', 'cfo'], from: '2026-10-13', back: '2026-10-27' }];   // execs on vacation (TJ 2026-10-13)
+const dayNum_ = key => { const [y, m, d] = key.split('-').map(Number); return (y * 12 + m) * 31 + d; };
+const away_ = (role, key) => AWAY.some(a => a.roles.includes(role) && dayNum_(key) >= dayNum_(a.from) && dayNum_(key) < dayNum_(a.back));
 let rosterKey = '';
-let liveCount = null;   // { day, n, pm: { n, h } } from the relay
+let liveCount = null;  // { day, n, pm: { n, h } } from the relay
 let liveToday = false;   // there's a live count for today: the people it counted are in now (TJ 2026-10-08), see wantPresent
 function pickRoster() {
   const z = zoneDay();
@@ -990,7 +994,7 @@ function pickRoster() {
   if (hrVisitor.today) hrVisitor.home.owner = hrVisitor;
   if (!hrVisitor.present) Object.assign(hrVisitor, { px: hrVisitor.home.x * C8, py: hrVisitor.home.y * C8, tx: hrVisitor.home.x, ty: hrVisitor.home.y });
   // the count comes from the product laptop, so a count for today means that seat is in, whatever the day (TJ 2026-10-08)
-  workers.forEach(w => { if (w.fixed) w.today = (lc && w.home.code === 'product-1') || (weekday && (!ROLES[w.role].days || ROLES[w.role].days.includes(z.wd))); });
+  workers.forEach(w => { if (w.fixed) w.today = !away_(w.role, z.key) && ((lc && w.home.code === 'product-1') || (weekday && (!ROLES[w.role].days || ROLES[w.role].days.includes(z.wd)))); });
   const want = PEOPLE != null ? PEOPLE : live;
   const n = Math.min(rest.length, want != null ? Math.max(0, want - workers.filter(w => (w.fixed || w === hrVisitor) && w.today).length) : Math.round(frac * rest.length));
   // people we know (a user id) fill the count first, in random order; the random-look desks only after them (TJ 2026-10-08)
