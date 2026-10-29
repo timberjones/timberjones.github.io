@@ -459,6 +459,7 @@ const ICONS = {
   cup: { r: [10, 0, 30, 29, 28], c: '#8a5530' },
   bulb: { r: [14, 17, 17, 14, 4], c: '#e8a020' },
   food: { r: [0, 14, 31, 31, 14], c: '#e8a020' },
+  candy: { r: [17, 27, 31, 27, 17], c: '#ec6a1f' },
   zzz: { r: [30, 2, 4, 8, 30], c: '#5b6a95' },
 };
 const CALL_ICONS = [['dots', 6], ['dollar', 2], ['check', 2], ['question', 2], ['excl', 1], ['smile', 2], ['chart', 1]];
@@ -696,6 +697,7 @@ const SPOTS = {
   sink: { dur: [4, 6], spots: [{ x: 28, y: 24, face: 'left' }, { x: 28, y: 25, face: 'left' }] },
   wc: { dur: [25, 50], hide: true, spots: [{ x: 21, y: 20, face: 'down', door: 21 }] },
   island: { dur: [15, 30], icon: 'cup', spots: [{ x: 30, y: 22, face: 'right' }, { x: 33, y: 22, face: 'left' }] },
+  snack: { dur: [6, 14], icon: 'candy', spots: [{ x: 30, y: 23, face: 'right' }, { x: 33, y: 23, face: 'left' }, { x: 30, y: 24, face: 'right' }, { x: 33, y: 24, face: 'left' }] },   // Halloween candy on the island
 };
 const ACTS = [['type', 44], ['call', 22], ['walkcall', 4], ['chat', 5], ['meeting', 2], ['coffee', 6], ['water', 3], ['fridge', 2], ['sink', 2], ['wc', 3], ['island', 3]];
 const spotUser = (k, i) => SPOTS[k].spots[i] && SPOTS[k].spots[i].using;
@@ -1207,6 +1209,7 @@ function* leave(w) {
 function* activity(w) {
   if (w.floater && w.home.owner && w.home.owner !== w && w.home.owner.present) { yield* reseat(w); return; }   // the owner's back
   if (w.prefers && w.home !== w.prefers && deskFree_(w.prefers, w) && chance(0.3)) { yield* reseat(w); return; }   // his favourite desk is free again
+  if (HALLOWEEN && w.acts !== DESKBOUND ? chance(0.15) : HALLOWEEN && chance(0.04)) { yield* visit(w, 'snack'); return; }   // the candy pile on the island
   const a = weighted(w.acts);
   if (a === 'reseat') { yield* reseat(w); return; }
   if (a === 'type') {
@@ -1794,6 +1797,22 @@ const DECOR = [
 function addDecor_() {   // into the sorted scene (buildDrawables)
   if (!HALLOWEEN) return;
   for (const [x, y, big, white, carved, row] of DECOR) STATIC.push({ key: row * C8 - 0.25, draw: () => drawPumpkin_(x, y, big, white ? WHITE_PUMPKIN : PUMPKIN_COL, carved) });
+}
+// the snack pile: an orange bowl heaped with wrapped candy on the island, full in the morning and running low by
+// evening (worked out from the hour, so every screen agrees); people pop over for some all day
+const CANDY_COLS = ['#d9453b', '#8b5cf6', '#f5d76e', '#22b573', '#3b6fd6', '#ec8f2b', '#5a3a22', '#f3ecdf'];
+const CANDY_HEAP = [[3, 0], [6, 0], [9, 0], [2, 1], [4, 1], [5, 1], [7, 1], [8, 1], [10, 1], [3, 2], [5, 2], [6, 2], [8, 2], [9, 2],
+  [4, 3], [6, 3], [7, 3], [5, 4], [8, 4], [6, 5]];   // [dx, layer]: layer 0 sits on the rim, higher layers pile up
+function drawSnacks_(x, y) {
+  if (!HALLOWEEN) return;
+  const left = clamp(1 - (world.hour - 8.5) / 10, 0.25, 1), n = Math.round(CANDY_HEAP.length * left), bx = x + 1, by = y + 14;
+  for (let k = 0; k < n; k++) {   // candies first, the bowl's rim drawn over their bottoms
+    const [dx, l] = CANDY_HEAP[k], cx = bx + dx, cy = by - l, col = CANDY_COLS[(k * 5 + dx) % CANDY_COLS.length];
+    R(cx - 1, cy, 3, 1, col); P(cx, cy - 1, col); P(cx, cy, '#ffffff');
+  }
+  R(bx, by + 1, 14, 1, OUT); R(bx + 1, by + 2, 12, 2, '#e8862a'); R(bx + 1, by + 2, 12, 1, '#f6aa55'); R(bx + 2, by + 4, 10, 1, '#c46a1c'); R(bx + 3, by + 5, 8, 1, OUT);
+  P(bx + 4, by + 3, '#2a1a10'); P(bx + 9, by + 3, '#2a1a10'); R(bx + 5, by + 3, 4, 1, '#c46a1c');   // a jack-o'-lantern face on the bowl
+  if (n > 3) { P(x - 1, by + 6, CANDY_COLS[0]); P(x + 16, by + 8, CANDY_COLS[2]); }   // a couple of dropped wrappers
 }
 function drawSillDecor_() {   // small pumpkins on the window sills (the static window-frame layer)
   if (!HALLOWEEN) return;
@@ -2418,7 +2437,7 @@ function drawPropRaw_(p) {
       if (spotUser('water', 0)) for (let k = 0; k < 3; k++) { const ph = (TIME * 1.5 + k * 0.33) % 1; P(x + 2 + k, bottom - 14 - ph * 5, '#ffffff'); }
       break;
     }
-    case 'island': blit(SPR.island, x, y); break;
+    case 'island': blit(SPR.island, x, y); drawSnacks_(x, y); break;
     case 'counterV': {
       const top = y - 2;
       blit(SPR.counterV, x, top);
@@ -3075,7 +3094,7 @@ function updateAmbient(dt) {
   }
   // background chatter: meetings, island, lunch table
   const talk = (group, icons, p) => { if (group.length > 1 && chance(dt * p)) { const w = pick(group); if (!w.bubble) say(w, weighted(icons), 1.6); } };
-  if (meeting) talk(meeting.members.filter(m => m.sitAt && m.sitAt.kind === 'meet'), MEET_ICONS, 0.6);  talk(SPOTS.island.spots.map(s => s.using).filter(Boolean), CHAT_ICONS, 0.4);
+  if (meeting) talk(meeting.members.filter(m => m.sitAt && m.sitAt.kind === 'meet'), MEET_ICONS, 0.6);  talk(SPOTS.island.spots.concat(SPOTS.snack.spots).map(s => s.using).filter(Boolean), CHAT_ICONS.concat([['candy', 2]]), 0.4);
   talk(LUNCH_SEATS.map(s => s.occ).filter(Boolean), CHAT_ICONS.concat([['food', 2]]), 0.35);
   if (meeting && TIME > meeting.end + 90) meeting = null;
   GLASS_DOORS.forEach(([a, b], i) => {   // sliding doors open when someone (or a dog) is close
