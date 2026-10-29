@@ -511,6 +511,12 @@ const COSTUME_MODS = {
   mummy(s, view, at) {   // bandage wraps round the head, body and legs
     for (const j of [2, 4, 10, 12, 14]) for (let i = 0; i < 12; i++) if ('hstTp'.includes(at(j, i))) s(j, i, 'v');
   },
+  luigi(s, view, at) {   // a dark moustache, and the blue overalls' bib and straps over the green shirt
+    const ov = (j, i) => { if ('tT'.includes(at(j, i))) s(j, i, 'p'); };
+    if (view === 'down') { for (let i = 3; i <= 8; i++) s(7, i, 'o'); for (const j of [9, 10]) { ov(j, 4); ov(j, 7); } for (const j of [11, 12]) for (let i = 4; i <= 7; i++) ov(j, i); }
+    else if (view === 'up') for (const j of [9, 10, 11, 12]) { ov(j, 4); ov(j, 7); }
+    else { s(7, 9, 'o'); s(7, 10, 'o'); s(7, 11, 'o'); for (const j of [9, 10, 11, 12]) ov(j, 6); }
+  },
   stripes(s, view, at) {   // a striped shirt (the pirate)
     for (const j of [10, 12]) for (let i = 0; i < 12; i++) if ('tT'.includes(at(j, i))) s(j, i, 'v');
   },
@@ -1717,6 +1723,14 @@ const COSTUMES = {
   pirate: { look: { shirt: '#f3ecdf', pants: '#2a2238', hat: null, accent: '#d9453b' }, mods: 'stripes', top: 'pirate' },
 };
 const COSTUME_KINDS = Object.keys(COSTUMES);
+// costumes people asked for (by Phoenix user id, or by role for the execs); everyone else gets one from the hash above
+Object.assign(COSTUMES, {
+  catears: { look: {}, top: 'ears' },
+  luigi: { look: { shirt: '#2f9a3a', pants: '#2d4596', hat: '#2f9a3a', beard: false, goatee: false, accent: '#2f9a3a' }, mods: 'luigi', top: 'luigi' },
+  raincats: { look: { shirt: '#f5c84a', accent: '#f5c84a' }, top: 'umbrella' },   // "it's raining cats and dogs": yellow raincoat, a cat and a dog hanging off the umbrella
+  bigwitch: { look: { hat: null }, top: 'bigwitch' },
+});
+const COSTUME_PICKS = { 2425: 'catears', coo: 'catears', 1426: 'luigi', 2342: 'raincats', 2104: 'bigwitch' };
 const NO_COSTUME = ['courier', 'water', 'janitor'];   // visitors from outside come as themselves
 function costumeOf_(w) {   // { kind, frames, top } for this person this season, or null (about 1 in 4 skip it)
   if (!HALLOWEEN || w.isDog || NO_COSTUME.includes(w.role)) return null;
@@ -1724,7 +1738,7 @@ function costumeOf_(w) {   // { kind, frames, top } for this person this season,
   if (!look || look.dog) return null;
   if (!holder.cos || holder.cos.look !== look) {   // built once (and again if they change their look on gm-user.html)
     const id = String(holder.uid || w.sid || w.i) + ':' + SEASON;
-    const kind = strHash_(id) < 0.25 ? null : COSTUME_KINDS[Math.floor(strHash_(id + 'k') * COSTUME_KINDS.length)], C = kind && COSTUMES[kind];
+    const kind = COSTUME_PICKS[holder.uid ? baseUid_(holder.uid) : ''] || COSTUME_PICKS[w.role] || (strHash_(id) < 0.25 ? null : COSTUME_KINDS[Math.floor(strHash_(id + 'k') * COSTUME_KINDS.length)]), C = kind && COSTUMES[kind];
     holder.cos = { look, kind, top: C && C.top, frames: C ? buildFrames(Object.assign({}, look, C.look, { costume: C.mods || kind })) : null };
   }
   return holder.cos.kind ? holder.cos : null;
@@ -1755,6 +1769,11 @@ const TOPS = {   // [rows, dx, dy (from the sprite's left / head top), palette]
     '..OHHHYHHHHO..', '.OOHHHHHHHHOO.', 'OHHHHHHHHHHHHO', '.OOOOOOOOOOOO.'], -1, -8, { H: '#2d4596', Y: '#f5d76e' }],
   straw: [['....OOOOOO....', '...OSSSSSSO...', '...ObbbbbbO...', 'OOOSSSSSSSSOOO', 'OSSSSSSSSSSSSO', '.OOOOOOOOOOOO.'], -1, -3, { S: '#d8b46a', b: '#7a4a2a' }],
   ears: [['..OO......OO..', '..OHO....OHO..', '..OHpO..OpHO..'], -1, -2, { H: '#1c1820', p: '#e88aa0' }],
+  bigwitch: [['...........OO.....', '.........OOHHO....', '........OHHHO.....', '.......OHHHHO.....', '.......OHHHHHO....', '......OHHHHHHO....',
+    '......OHHHHHHHO...', '.....OHHHHHHHHO...', '.....OHHHHHHHHHO..', '....ObbbbbbbbbbO..', '....ObbbbYYbbbbO..', 'OOOOHHHHHHHHHHHHOO', 'OHHHHHHHHHHHHHHHHO',
+    '.OOOOOOOOOOOOOOOO.'], -3, -11, { H: '#2a2232', b: '#8b5cf6', Y: '#f5d76e' }],
+  umbrella: [['.......OO.......', '....OOOUUOOO....', '..OOUUUUUUUUOO..', '.OUUuUUUUuUUUUO.', 'OUUUUUUUUUUUUUUO', 'OOOOOOOOOOOOOOOO',
+    '.l.....O......l.', 'K.K....O.....BWB', 'KKK....O.....WWW', '.K............W.'], -2, -9, { U: '#3b6fd6', u: '#7fb8e8', l: '#9aa4b0', K: '#1c1820', B: '#a8743a', W: '#f3ecdf' }],
   horns: [['..O........O..', '.OHO......OHO.', '.OHHO....OHHO.', '..OHHO..OHHO..'], -1, -3, { H: '#d9453b' }],
 };
 const COLLAR_SIDE = ['.O.', 'OK.', 'ORK', 'ORK'], COLLAR_FRONT = ['O..........O', 'OO........OO', '.RO......OR.', '.RRO....ORR.'];
@@ -1766,6 +1785,10 @@ function drawCostumeTop_(kind, sx, ht, view) {
     Object.assign(pal, { R: '#9a1a24', K: '#1a1420' });
     if (view === 'right' || view === 'left') drawMap_(COLLAR_SIDE, view === 'right' ? sx + 1 : sx + 8, ht + 5, pal, view === 'left');
     else drawMap_(COLLAR_FRONT, sx, ht + 5, pal);
+  } else if (kind === 'luigi') {   // the white badge with a green L on the cap
+    if (view === 'up') return;
+    const bx = view === 'down' ? sx + 4 : view === 'right' ? sx + 7 : sx + 1;
+    R(bx, ht, 4, 3, '#f3ecdf'); R(bx + 1, ht, 1, 3, '#2f9a3a'); P(bx + 2, ht + 2, '#2f9a3a');
   } else if (kind === 'pirate') {   // red bandana with white dots; an eye patch on its strap
     Object.assign(pal, { R: '#d9453b', W: '#f3ecdf', K: '#1a1a24' });
     drawMap_(BANDANA, sx - 1, ht, pal);
