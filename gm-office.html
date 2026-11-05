@@ -3748,7 +3748,7 @@ function debugFrame_(now, ms) {
   mctx.fillStyle = 'rgba(0,0,0,0.7)'; mctx.fillRect(0, 0, tw + fs, fs * 1.6);
   mctx.fillStyle = '#7fe0b0'; mctx.fillText(txt, fs / 2, fs * 1.15);
 }
-// A fresh start once a night (about 3 am Eastern, when nobody's in), so an old TV browser never runs for weeks on end.
+// A fresh start once a night (about 3 am Eastern, when nobody's in), so an old TV browser never runs for weeks on end. (Or push any change: the 5-min version check reloads the TV.)
 setInterval(() => { const h = zoneNow().h; if (h >= 3 && h < 3.1 && performance.now() > 2 * 3600 * 1000 && location.protocol !== 'file:') reloadFresh_(); }, 60 * 1000);
 requestAnimationFrame(frame);
 let hiddenAt = 0;
