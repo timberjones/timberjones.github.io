@@ -87,7 +87,12 @@ const TZ = params.get('tz') || 'America/Toronto';
 const LOFI = params.get('lofi') !== '0';
 // 60 fps for smooth half-pixel motion; TV browsers (weak CPUs) get 30 by default. ?fps= overrides either way.
 const IS_TV = /SMART-TV|SmartTV|Tizen|Web0S|WebOS|NetCast|HbbTV|BRAVIA|AFT[A-Z]|CrKey|Roku|Viera|Philips|Hisense|VIDAA/i.test(navigator.userAgent || '');
-const FPS = Math.max(15, Math.min(60, parseInt(params.get('fps')) || (IS_TV ? 30 : 60)));
+// A slow screen steps itself down (see perfCheck_) and remembers it here for a week, so after a reload it starts
+// at the lower setting instead of lagging again. ?fps= / ?ss= in the URL always win.
+const PERF_KEY = 'gmo-perf';
+const perfSaved = (() => { try { const v = JSON.parse(localStorage.getItem(PERF_KEY) || 'null'); return v && Date.now() - v.at < 7 * 86400000 ? v : null; } catch (e) { return null; } })();
+let perfLow = !!(perfSaved && perfSaved.ss === 1);   // true: render the scene at 1x (no supersampling)
+let FPS = Math.max(15, Math.min(60, parseInt(params.get('fps')) || (perfSaved && perfSaved.fps) || (IS_TV ? 30 : 60)));
 const C8 = 8, GX = 48, GY = 28;          // 8px grid cells; x 0-5 is the entrance corridor, x 6-47 the office
 const WALK = 30;                          // px per second
 const OUT = params.get('style') === 'classic' ? '#1a1c3a' : '#33251f';   // outline: warm dark brown (cozy style); classic = navy
@@ -3003,7 +3008,7 @@ function resize() {
   // The scene renders at 2x (HD sprites with rims, half-pixel motion; ?hd=0 for 1x) and is scaled up with
   // square pixels. ?smooth=1 adds a GPU Scale2x pass on the final upscale (rounder corners).
   epxOn = SMOOTH && scale >= 2 && setupEpx_(Math.round(VW * scale), Math.round(VH * scale));
-  SS = epxOn ? ART : params.has('ss') ? Math.max(1, parseInt(params.get('ss')) || 1) : (scale >= 3.5 || scale === 2 ? ART : 1);   // 2x scene when each scene pixel is >= ~2 screen pixels (or exactly 1)
+  SS = epxOn ? ART : params.has('ss') ? Math.max(1, parseInt(params.get('ss')) || 1) : perfLow ? 1 : (scale >= 3.5 || scale === 2 ? ART : 1);   // 2x scene when each scene pixel is >= ~2 screen pixels (or exactly 1)
   view = canvas(VW * SS, VH * SS); vctx = view.getContext('2d'); sceneCtx = vctx;
   lc.c = canvas(VW * SS, VH * SS); lc.x = lc.c.getContext('2d');
   exteriorDirty = true;
@@ -3717,7 +3722,31 @@ setInterval(checkForUpdate_, 5 * 60 * 1000);
 setInterval(() => { MONTH = zoneNow().month || MONTH; }, 3600 * 1000);
 setInterval(pickRoster, 60 * 1000);   // new day: a new set of people comes in
 let last = performance.now(), acc = 0;
-const STEP = 1 / FPS;
+let STEP = 1 / FPS;
+// Lag guard: every 10 s, count the frames actually drawn. If two windows in a row fall well short of the target (or the
+// work per frame eats most of the budget), step down one notch: 60 -> 30 fps, then 1x scene (no supersampling), then
+// 20, then 15 fps. Saved for a week (PERF_KEY). Not when ?fps / ?ss are set by hand, and not in the first 20 s.
+const perf = { t: 0, n: 0, ms: 0, bad: 0, manual: params.has('fps') || params.has('ss') };
+function perfCheck_(now, ms) {
+  if (perf.manual) return;
+  if (!perf.t) { perf.t = now + 20000; return; }   // let the start-up work settle first
+  if (now < perf.t) { if (perf.t - now > 20000) perf.t = now; return; }
+  perf.n++; perf.ms += ms;
+  if (now - perf.t < 10000) return;
+  const secs = (now - perf.t) / 1000, fps = perf.n / secs, avg = perf.ms / (perf.n || 1);
+  const slow = fps < FPS * 0.75 || avg > 800 / FPS;
+  perf.bad = slow ? perf.bad + 1 : 0; perf.t = now; perf.n = 0; perf.ms = 0;
+  if (perf.bad < 2) return;
+  perf.bad = 0;
+  if (FPS > 30) FPS = 30;
+  else if (SS > 1 && !perfLow) { perfLow = true; resize(); }
+  else if (FPS > 20) FPS = 20;
+  else if (FPS > 15) FPS = 15;
+  else return;
+  STEP = 1 / FPS;
+  try { localStorage.setItem(PERF_KEY, JSON.stringify({ fps: FPS, ss: perfLow ? 1 : 0, at: Date.now() })); } catch (e) {}
+  if (window.console) console.warn('lag guard: now', FPS, 'fps, SS', SS);
+}
 function frame(now) {
   requestAnimationFrame(frame);
   let dt = (now - last) / 1000; last = now;
@@ -3727,9 +3756,11 @@ function frame(now) {
   if (acc < STEP - 0.004) return;   // some slack: a frame a hair early (vsync jitter) still counts, else every other one is skipped and motion stutters
   const s = Math.min(acc, 0.12); acc = 0;
   try {
-    const t0 = DEBUG ? performance.now() : 0;
+    const t0 = performance.now();
     step(s); render(); okAt = Date.now();
-    if (DEBUG) debugFrame_(now, performance.now() - t0);
+    const took = performance.now() - t0;
+    perfCheck_(now, took);
+    if (DEBUG) debugFrame_(now, took);
   }
   catch (e) {   // a bad frame: keep going, but if it keeps failing for 30 s, start fresh rather than sit frozen on the TV
     if (Date.now() - okAt > 30000 && !healing) { healing = true; reloadFresh_(); }
