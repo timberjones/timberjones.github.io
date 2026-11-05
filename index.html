@@ -19,11 +19,29 @@ var FRAME_SHELL = true;
 (function () {
   var q = location.search, h = location.hash;
   if (/[?&]user(=|_\d)/.test(q)) { location.replace('gm-office.html' + q + h); return; }   // old ?user= links: the user page
-  var f = document.createElement('iframe');
-  f.src = 'gm-office.html' + q + h;
-  f.setAttribute('allowfullscreen', ''); f.setAttribute('allow', 'fullscreen');
-  f.onload = function () { try { f.contentWindow.focus(); } catch (e) {} };   // keys (the remote's OK) go to the office
-  document.body.appendChild(f);
+  // Left on 24/7, so nothing may pile up: each update and the 3 am restart throw the office frame away and build a
+  // fresh one (freshFrame, called by gm-office.html), and the keep-awake video is rebuilt with it.
+  var f = null, born = 0;
+  function makeFrame(src) {
+    if (f) { try { f.src = 'about:blank'; } catch (e) {} if (f.parentNode) f.parentNode.removeChild(f); }
+    var n = document.createElement('iframe');
+    n.src = src;
+    n.setAttribute('allowfullscreen', ''); n.setAttribute('allow', 'fullscreen');
+    n.onload = function () { try { n.contentWindow.focus(); } catch (e) {} };   // keys (the remote's OK) go to the office
+    document.body.appendChild(n);
+    f = n; born = Date.now();
+  }
+  function freshSrc() { return 'gm-office.html' + (q ? q + '&' : '?') + 'v=' + Date.now() + h; }
+  makeFrame('gm-office.html' + q + h);
+  window.freshFrame = function (src) { setTimeout(function () { makeFrame(src || freshSrc()); makeWake(); }, 0); };
+  // Watchdog: the office stamps gmAlive on every good frame. Silent for 2 minutes (frozen, or it never loaded, e.g.
+  // the network was down at 3 am) -> build a new frame; it keeps retrying every 2 minutes until one runs.
+  setInterval(function () {
+    if (document.hidden || Date.now() - born < 120000) return;
+    var a = 0;
+    try { a = f.contentWindow.gmAlive || 0; } catch (e) {}
+    if (Date.now() - a > 120000) { makeFrame(freshSrc()); makeWake(); }
+  }, 30000);
   function toggle() {
     var d = document, el = d.documentElement;
     if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
@@ -36,11 +54,17 @@ var FRAME_SHELL = true;
   // off the screensaver while a video plays, so a 1-pixel, muted, looping, blank video plays here (keepawake.mp4, the
   // clip from NoSleep.js, MIT). It lives in this page, so the office's reloads don't stop it. Some browsers only play
   // video after a click or key, so the office calls keepAwake() on each one (and we retry every minute).
-  var wake = document.createElement('video'), lock = null;
-  wake.src = 'keepawake.mp4'; wake.muted = true;
-  wake.setAttribute('muted', ''); wake.setAttribute('loop', ''); wake.setAttribute('playsinline', '');
-  wake.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:1';
-  document.body.appendChild(wake);
+  var wake = null, lock = null;
+  function makeWake() {
+    if (wake) { try { wake.pause(); wake.removeAttribute('src'); wake.load(); } catch (e) {} if (wake.parentNode) wake.parentNode.removeChild(wake); }
+    wake = document.createElement('video');
+    wake.src = 'keepawake.mp4'; wake.muted = true;
+    wake.setAttribute('muted', ''); wake.setAttribute('loop', ''); wake.setAttribute('playsinline', '');
+    wake.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:1';
+    document.body.appendChild(wake);
+    var p = wake.play(); if (p && p.catch) p.catch(function () {});
+  }
+  makeWake();
   function keepAwake() {
     if (navigator.wakeLock && !lock) {
       lock = navigator.wakeLock.request('screen');
