@@ -73,6 +73,7 @@
     ?hd=0           plain 1x sprites (no HD detail or rims)       ?round=1  rounded (Scale2x) sprite corners
     ?seed=N         seed the randomness                  ?dogs=1    bring the poodles in right away (9:00-16:30)
     ?chat=0         no speech bubbles at all              ?feed=0    don't read the live activity feed
+    ?turkey=1       the Thanksgiving turkey comes in now (November only otherwise; ?turkey=0 = never)
   Keys: N night, D day, C real clock, W cycle weather, B say a one-liner now, F fullscreen
 
   Drive your own character (and dress it up) on gm-user.html: it goes live here through the GM Office relay, a
@@ -1470,6 +1471,97 @@ function drawDog(d) {
   d.headX = sx + 5; d.headTop = sy + 2;
 }
 
+// ---------------------------------------------------------------- the Thanksgiving turkey (November only, Eastern time)
+// A big live turkey (nearly as tall as a person, much bigger than the poodles) struts in from the hallway once every
+// half hour, at a random time in it, wanders around the office gobbling now and then, and leaves. Any hour of the day.
+// Click it and it gobbles. ?turkey=1 sends one in right away (any month), ?turkey=0 turns it off.
+// F fan, r fan stripe, f fan tips, B body, b body shade, w wing, H head, e eye, y beak, R wattle, L legs
+const TURKEY_R_A = [
+  '.ffff.........',
+  'fFFFFf....HH..',
+  'fFrrFFf..HHeHy',
+  'fFrFrFFf..HHH.',
+  'fFrFrFrF..RH..',
+  'fFrFrFBBB.RH..',
+  'fFrFrBBwwBBH..',
+  'fFrFBBwwwwBBB.',
+  '.fFFBBBwwwBBB.',
+  '..ffbBBBBBBBb.',
+  '....bbBBBBBb..',
+  '......bbbbb...',
+  '......L...L...',
+  '......LL..LL..'];
+const TURKEY_R_B = TURKEY_R_A.map((r, j) => j === 12 ? '.......L.L....' : j === 13 ? '.......LL.LL..' : r);
+const TURKEY_D_A = [
+  '...ffffffff...',
+  '.ffFrFrrFrFff.',
+  'fFrFrFrrFrFrFf',
+  'fFrFrHHHHrFrFf',
+  'fFrFreHHerFrFf',
+  'fFrFrHyyHrFrFf',
+  'fFrFBBRRBBFrFf',
+  '.fFBBwRRwBBFf.',
+  '..fBBwBBwBBf..',
+  '...BBBBBBBB...',
+  '...bBBBBBBb...',
+  '....bbbbbb....',
+  '.....L..L.....',
+  '....LL..LL....'];
+const TURKEY_D_B = TURKEY_D_A.map((r, j) => j === 12 ? '.....L..L.....' : j === 13 ? '....LL...L....' : r);
+const TURKEY_U_A = TURKEY_D_A.map((r, j) => j >= 3 && j <= 5 ? 'fFrFrFrrFrFrFf' : j === 6 ? 'fFrFBBBBBBFrFf' : j === 7 ? '.fFBBBBBBBBFf.' : j === 8 ? '..fBBBBBBBBf..' : r);
+const TURKEY_U_B = TURKEY_U_A.map((r, j) => j === 13 ? '....LL...L....' : r);
+const TURKEY_PAL = { F: '#6b3f22', r: '#b0602e', f: '#e2c48e', B: '#7a4a2a', b: '#5a341c', w: '#a0703e', H: '#a9bccb', e: '#1a1214', y: '#e8b33a', R: '#d23a2e', L: '#d98a3a' };
+const GOBBLE = ['Gobble gobble!', 'Gobble!', 'Gobble gobble gobble!'];
+const TURKEY_ON = params.has('turkey') ? params.get('turkey') !== '0' : zoneDay_().key.split('-')[1] === '11';
+let turkeyPending = params.get('turkey') === '1';
+const turkey = { present: false, hidden: false, px: 0, py: 0, tx: -1, ty: -1, dir: 'right', walkT: 0, pose: 'stand', bubble: null, headX: 0, headTop: 0, frames: null };
+function turkeyFrames_() {
+  if (turkey.frames) return turkey.frames;
+  const p = TURKEY_PAL, F = {};
+  F.rightA = bakeRows(TURKEY_R_A, p); F.rightB = bakeRows(TURKEY_R_B, p); F.leftA = bakeRows(TURKEY_R_A, p, true); F.leftB = bakeRows(TURKEY_R_B, p, true);
+  F.downA = bakeRows(TURKEY_D_A, p); F.downB = bakeRows(TURKEY_D_B, p); F.upA = bakeRows(TURKEY_U_A, p); F.upB = bakeRows(TURKEY_U_B, p);
+  return (turkey.frames = F);
+}
+function* turkeyLife() {
+  if (!TURKEY_ON) return;
+  let block = Math.floor(world.hour * 2), at = block / 2 + rnd(0, 20) / 60;   // a random moment in the first 20 min of each half hour (so it's out before the next)
+  if (at < world.hour) at = 99;   // opened after this half hour's moment: wait for the next half hour
+  for (;;) {
+    yield () => turkeyPending || world.hour >= at || Math.floor(world.hour * 2) !== block;
+    if (turkeyPending || world.hour >= at) {
+      turkeyPending = false;
+      if (!townhallNow_()) yield* turkeyVisit();
+      at = 99;   // done for this half hour
+    } else { block = Math.floor(world.hour * 2); at = block / 2 + rnd(0, 20) / 60; }
+  }
+}
+function* turkeyVisit() {
+  turkeyFrames_();
+  const row = chance(0.5) ? 25 : 26, SPD = 20;   // a slow, proud strut
+  Object.assign(turkey, { present: true, px: hallX(), py: row * C8, tx: -1, ty: -1, pose: 'walk' });
+  yield* walkStraight(turkey, 0, row * C8, SPD);
+  turkey.tx = 0; turkey.ty = row;
+  if (chance(0.7)) say_(turkey, pick(GOBBLE), 2.5, true);
+  const end = TIME + rnd(150, 300);
+  while (TIME < end) {
+    const [x, y] = pick(FLOOR);
+    yield* walkTo(turkey, x, y, SPD);
+    turkey.pose = 'stand';
+    yield rnd(2, 8);
+    if (chance(0.35)) say_(turkey, pick(GOBBLE), 2.5, true);
+  }
+  yield* walkTo(turkey, 0, row, SPD);
+  yield* walkStraight(turkey, hallX(), row * C8, SPD);
+  turkey.present = false; turkey.tx = -1; turkey.ty = -1;
+}
+function drawTurkey(t) {
+  const F = turkeyFrames_(), X = snap(t.px), Y = snap(t.py), f = t.pose === 'walk' && Math.floor(t.walkT * 6) % 2 ? 'B' : 'A';
+  if (!CLASSIC) groundShadow_(X + 4, Y + 8, 6);
+  const sx = X - 3, sy = Y - 6;   // 14 x 14, feet on the cell's bottom edge like everyone else
+  blit(F[t.dir + f], sx, sy);
+  t.headX = t.dir === 'right' ? sx + 11 : t.dir === 'left' ? sx + 2 : sx + 7; t.headTop = sy + 1;
+}
+
 // ---------------------------------------------------------------- food delivery (11:00-14:00, now and then)
 // A courier comes in from the hallway with a bag, hovers around the entrance / closet calling out the drop-off,
 // and someone nearby walks over to take it. ?delivery=1 sends one right away.
@@ -2437,6 +2529,7 @@ function drawSecretArt_() {
   const hit = e => e.present && !e.hidden && e.px + 12 > r.x && e.px - 3 < r.x + r.w && e.py + 9 > r.y && e.py - 12 < r.y + r.h && e.py + 8 > art.y + 2;
   const front = [...workers.filter(hit).map(w => [w, drawPerson]), ...dogs.filter(hit).map(d => [d, drawDog])];
   for (const o of [courier, waterGuy, janitor]) if (o.present && hit(o)) front.push([o, drawPerson]);
+  if (hit(turkey)) front.push([turkey, drawTurkey]);
   if (!front.length) return;
   front.sort((a, b) => a[0].py - b[0].py);
   if (!artFix) artFix = canvas(1, 1);
@@ -3056,6 +3149,7 @@ function render() {
     if (janitor.px >= 0) lights.push({ x: janitor.px + 4, y: janitor.py, r: 40, a: 0.55 });   // a dimmed ceiling light left on where he's working
   }
   for (const d of dogs) if (d.present) list.push({ key: d.py + C8 + 0.45, draw: () => drawDog(d) });
+  if (turkey.present) list.push({ key: turkey.py + C8 + 0.45, draw: () => drawTurkey(turkey) });
   if (courier.present) list.push({ key: courier.py + C8 + 0.5, draw: () => drawPerson(courier) });
   if (waterGuy.present) list.push({ key: waterGuy.py + C8 + 0.5, draw: () => drawPerson(waterGuy) });
   list.sort((a, b) => a.key - b.key);
@@ -3130,7 +3224,7 @@ function updateAmbient(dt) {
   talk(LUNCH_SEATS.map(s => s.occ).filter(Boolean), CHAT_ICONS.concat([['food', 2]]), 0.35);
   if (meeting && TIME > meeting.end + 90) meeting = null;
   GLASS_DOORS.forEach(([a, b], i) => {   // sliding doors open when someone (or a dog) is close
-    const near = workers.concat(dogs).some(e => e.present && !e.hidden && e.px >= a * C8 - 8 && e.px <= b * C8 + 8 && e.py >= 6 * C8 && e.py <= 10 * C8);
+    const near = workers.concat(dogs, turkey).some(e => e.present && !e.hidden && e.px >= a * C8 - 8 && e.px <= b * C8 + 8 && e.py >= 6 * C8 && e.py <= 10 * C8);
     doorOpen[i] += ((near ? 1 : 0) - doorOpen[i]) * Math.min(1, dt * 6);
   });
   if (world.hour < 11) for (const w of workers) w.lunchDone = false;
@@ -3376,8 +3470,8 @@ function setRole_(lead, peers) {
     for (const w of workers) w.ctl = null;
   }
 }
-const idxOf_ = w => w === courier ? -1 : w === waterGuy ? -2 : w === janitor ? -5 : dogs.includes(w) ? -3 - dogs.indexOf(w) : workers.indexOf(w);
-const whoAt_ = i => i === -1 ? courier : i === -2 ? waterGuy : i === -5 ? janitor : i <= -3 ? dogs[-3 - i] : workers[i];
+const idxOf_ = w => w === turkey ? -6 : w === courier ? -1 : w === waterGuy ? -2 : w === janitor ? -5 : dogs.includes(w) ? -3 - dogs.indexOf(w) : workers.indexOf(w);
+const whoAt_ = i => i === -6 ? turkey : i === -1 ? courier : i === -2 ? waterGuy : i === -5 ? janitor : i <= -3 ? dogs[-3 - i] : workers[i];
 const ent_ = o => [o.present ? 1 : 0, o.hidden ? 1 : 0, Math.round(o.px * 2) / 2, Math.round(o.py * 2) / 2, o.dir, o.pose,
   o.seated && o.sitAt ? SEATS.indexOf(o.sitAt) : -1, o.headset ? 1 : 0, o.bag ? 1 : 0];
 function sendSnap_() {
@@ -3387,6 +3481,7 @@ function sendSnap_() {
     c: courier.present && courier.look ? ent_(courier).concat([courier.look]) : null,
     j: waterGuy.present && waterGuy.look ? ent_(waterGuy).concat([waterGuy.look, waterGuy.jug ? 1 : 0]) : null,
     d: dogs.map(d => [d.present ? 1 : 0, Math.round(d.px * 2) / 2, Math.round(d.py * 2) / 2, d.dir, d.pose]),
+    tk: turkey.present ? [Math.round(turkey.px * 2) / 2, Math.round(turkey.py * 2) / 2, turkey.dir, turkey.pose] : null,
     k: janitor.present ? ent_(janitor).concat([janitor.phones ? 1 : 0, janitor.mopping ? 1 : 0]) : null,
     s: speeches.map(x => [idxOf_(x.w), x.text, Math.round(x.t * 10) / 10, x.life, x.greet ? 1 : 0]),
   });
@@ -3424,7 +3519,7 @@ let okTexts = null, okFeed = null;
 function okText_(t) {   // only lines this page could have said itself, so a forged snapshot can't put words on the TV
   if (!okTexts || okFeed !== feed) {
     okFeed = feed;
-    const all = [].concat(CLICK_LINES, [ANGRY_LINE, WOOF, CFO_LINE], GREETINGS.morning, GREETINGS.bye, COURIER_LINES, WATER_LINES, JANITOR_SONGS, JANITOR_WHO, JANITOR_SHRUG);
+    const all = [].concat(CLICK_LINES, [ANGRY_LINE, WOOF, CFO_LINE], GOBBLE, GREETINGS.morning, GREETINGS.bye, COURIER_LINES, WATER_LINES, JANITOR_SONGS, JANITOR_WHO, JANITOR_SHRUG);
     for (const k in ROLES) if (ROLES[k].lines) all.push(...ROLES[k].lines);
     for (const k in ACTIONS) for (const a of ACTIONS[k]) if (a.lines) all.push(...a.lines);
     if (feed) for (const e of feed.feed) if (Array.isArray(e.speech)) all.push(...e.speech);
@@ -3472,6 +3567,11 @@ function applySnap_(m) {
     glideTo_(d, num_(e[1], -4000, GX * C8), num_(e[2], -64, GY * C8));
     d.present = !!e[0]; d.dir = FACES.includes(e[3]) ? e[3] : 'right'; d.pose = e[4] === 'walk' ? 'walk' : 'stand';
   });
+  if (Array.isArray(m.tk)) {   // the November turkey
+    turkeyFrames_();
+    glideTo_(turkey, num_(m.tk[0], -4000, GX * C8), num_(m.tk[1], -64, GY * C8));
+    turkey.present = true; turkey.dir = FACES.includes(m.tk[2]) ? m.tk[2] : 'right'; turkey.pose = m.tk[3] === 'walk' ? 'walk' : 'stand';
+  } else turkey.present = false;
   if (Array.isArray(m.k)) {
     janitor.frames = janitor.frames || framesFor_(JANITOR_LOOK);
     applyEnt_(janitor, m.k); janitor.phones = !!m.k[9]; janitor.mopping = !!m.k[10];
@@ -3492,7 +3592,7 @@ function followStep_(dt) {   // glide everyone toward the latest snapshot
     }
     if (o.pose === 'walk') o.walkT += dt;
   };
-  workers.forEach(glide); dogs.forEach(glide); glide(courier); glide(waterGuy); glide(janitor);
+  workers.forEach(glide); dogs.forEach(glide); glide(turkey); glide(courier); glide(waterGuy); glide(janitor);
 }
 function seededLook_(uid) {   // a visitor with no look of their own: the same random look on every screen
   const keep = seed; seed = 0; for (const ch of String(uid)) seed = (Math.imul(seed, 31) + ch.charCodeAt(0)) | 0;
@@ -3518,11 +3618,12 @@ function takeCharge_() {
     })());
   }
   dogs.forEach(d => { d.present = false; d.glide = null; });
+  turkey.present = false; turkey.glide = null;
   courier.present = false; courier.glide = null;
   waterGuy.present = false; waterGuy.glide = null; waterGuy.jug = false; SPOTS.water.spots[0].busy = null;
   janitor.glide = null; janitor.asking = false; if (janitor.px < 0) janitor.present = false;   // in the doorway: he's gone
   extraCos.dog0.restart(() => dogLife(dogs[0], dogs[1])); extraCos.dog1.restart(() => dogLife(dogs[1], dogs[0]));
-  extraCos.courier.restart(courierLife); extraCos.water.restart(waterLife); extraCos.janitor.restart(janitorLife);
+  extraCos.courier.restart(courierLife); extraCos.turkey.restart(turkeyLife); extraCos.water.restart(waterLife); extraCos.janitor.restart(janitorLife);
 }
 // Today's real headcount arrived: right after the page opens, just swap who's at their desk (nobody walks in or
 // out because the page started with the weekday guess); later on, people come and go on foot as usual.
@@ -3568,7 +3669,7 @@ if (carried) {
   }
 } else for (const w of workers) if (wantPresent(w)) { w.present = true; placeAtHome_(w); w.greeted = rosterKey; }   // already at work when the page opens (and already said good morning)
 if (janitorTime_()) { placeJanitor_(); if (!carried) janitorWhoAt = 2.5; }   // opened at night: he's mid-shift, and hears you come in
-const extraCos = { janitor: new Co(janitorLife), dog0: new Co(() => dogLife(dogs[0], dogs[1])), dog1: new Co(() => dogLife(dogs[1], dogs[0])), courier: new Co(courierLife), water: new Co(waterLife) };
+const extraCos = { janitor: new Co(janitorLife), dog0: new Co(() => dogLife(dogs[0], dogs[1])), dog1: new Co(() => dogLife(dogs[1], dogs[0])), courier: new Co(courierLife), turkey: new Co(turkeyLife), water: new Co(waterLife) };
 const cos = [...workers.map(w => (w.co = new Co(() => life(w), w))), ...Object.values(extraCos)];
 if (!params.has('seed')) seed = (Math.random() * 1e9) | 0;
 if (params.get('dogs') === '1') dogs.forEach(d => { d.follow = true; });   // preview: both poodles come in right away
@@ -3590,6 +3691,7 @@ function personAt_(e) {   // the front-most person under the mouse, or null
     if (!d.present) continue;
     if (x >= d.headX - 6 && x <= d.headX + 5 && y >= d.headTop - 3 && y <= d.headTop + 6 && (!best || d.headTop > best.headTop)) best = d;
   }
+  if (turkey.present && x >= turkey.headX - 8 && x <= turkey.headX + 8 && y >= turkey.headTop - 1 && y <= turkey.headTop + 14 && (!best || turkey.headTop > best.headTop)) best = turkey;
   return best;
 }
 // The cursor hides after a few seconds without movement (and on load), so it doesn't sit on the TV picture.
@@ -3670,6 +3772,7 @@ function cfoWatch_(w) {
 function poke_(w) {
   if (w === janitor) { janitorAsk_(6); return; }   // clicking the janitor: "Who's there?"
   if (dogs.includes(w) || w.isDog) { say_(w, WOOF, 2, true); return; }   // click a dog and it barks
+  if (w === turkey) { say_(w, pick(GOBBLE), 2.5, true); return; }   // click the turkey and it gobbles
   if (w.angryUntil > TIME) return;   // still cross: clicks do nothing
   w.pokes = (w.pokes || []).filter(t => TIME - t < CLICK_WINDOW);
   if (w.pokes.length >= CLICK_BURST) {
