@@ -16,6 +16,7 @@ iframe { position: fixed; top: 0; left: 0; width: 100%; height: 100%; border: 0;
 // frame reloads, so the TV stays fullscreen. A reloaded page can't go fullscreen by itself, it needs a click.
 // Plain ES5: the TV's browser is old.
 var FRAME_SHELL = true;
+var SHELL_NIGHTLY = true;   // this page reloads itself each night, so the office skips its own 3 am restart
 (function () {
   var q = location.search, h = location.hash;
   if (/[?&]user(=|_\d)/.test(q)) { location.replace('gm-office.html' + q + h); return; }   // old ?user= links: the user page
@@ -42,6 +43,24 @@ var FRAME_SHELL = true;
     try { a = f.contentWindow.gmAlive || 0; } catch (e) {}
     if (Date.now() - a > 120000) { makeFrame(freshSrc()); makeWake(); }
   }, 30000);
+  // Once a day, about 3:10 am (TV's clock), reload this whole page, not only the office frame: frame rebuilds free the
+  // office, but an old TV browser still slows down over days. Costs fullscreen: press OK on the remote in the morning.
+  // Only reloads once a quick check shows the site is reachable, since a page that fails to load would leave a browser
+  // error screen with no watchdog to recover it. This also picks up changes to this page within a day.
+  var loadedAt = Date.now(), reloading = false;
+  setInterval(function () {
+    var d = new Date(), m = d.getHours() * 60 + d.getMinutes();
+    if (reloading || m < 190 || m > 230 || Date.now() - loadedAt < 2 * 3600000 || location.protocol === 'file:') return;
+    var x = new XMLHttpRequest();
+    x.open('HEAD', location.pathname + '?check=' + Date.now(), true);
+    x.onload = function () {
+      if (x.status < 200 || x.status >= 400 || reloading) return;
+      reloading = true;
+      var s = q.replace(/([?&])v=[^&]*&?/, '$1').replace(/[?&]$/, '');
+      location.replace(location.pathname + (s ? s + '&' : '?') + 'v=' + Date.now() + h);
+    };
+    x.send();
+  }, 60000);
   function toggle() {
     var d = document, el = d.documentElement;
     if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
