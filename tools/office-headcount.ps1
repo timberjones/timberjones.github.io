@@ -191,6 +191,14 @@ if ($infraNew) {
     try { @($infra.GetEnumerator() | ForEach-Object { [pscustomobject]@{ MAC = $_.Key; Name = $_.Value } }) | ConvertTo-Json | Set-Content -Encoding UTF8 $infraFile } catch {}
 }
 
+# MacBooks on private (randomized) Wi-Fi addresses look like phones by MAC, but answer a local name lookup
+# (LLMNR / mDNS) with their Mac name, e.g. "Someones-MacBook-Air.local"; phones don't answer. Count those as laptops
+# (2026-11-26: 3 MacBook Airs were being missed). Names stay on this laptop: only the count is pushed.
+foreach ($d in @($devices | Where-Object Type -eq 'Private')) {
+    $n = try { (Resolve-DnsName $d.IP -LlmnrNetbiosOnly -QuickTimeout -ErrorAction Stop | Where-Object NameHost | Select-Object -First 1).NameHost } catch { $null }
+    if ($n -match 'macbook') { $d.Type = 'Apple'; $d.Vendor = '(randomized) MacBook'; $d.Name = '' }
+}
+
 if ($ShowDevices) {
     $order = @{ Laptop = 0; Apple = 1; Private = 2; Other = 3; Baseline = 4 }
     $devices | Sort-Object { $order[$_.Type] }, { ConvertTo-Num $_.IP } | Format-Table Type, IP, MAC, Vendor, Name -AutoSize
@@ -204,7 +212,7 @@ $est = $laptops + $apple
 
 Write-Host ''
 Write-Host ("Laptops (PC)     : {0}  (incl. you)" -f $laptops)
-Write-Host ("Apple            : {0}  (Mac, or iPhone with private address off)" -f $apple)
+Write-Host ("Apple            : {0}  (MacBooks, or an iPhone with private address off)" -f $apple)
 Write-Host ("Ignored          : {0} phones/private MACs, {1} printers/TVs/IoT/always-on" -f $phones, $other) -ForegroundColor DarkGray
 if ($apple) { Write-Host ("Estimated people : ~{0}  (range {1}-{0})" -f $est, $laptops) -ForegroundColor Green }
 else        { Write-Host ("Estimated people : ~{0}" -f $est) -ForegroundColor Green }
