@@ -51,7 +51,7 @@ $configFile = Join-Path $here 'headcount-config.json'   # { relay, token, ssidPa
 $config = if (Test-Path $configFile) { Get-Content $configFile -Raw | ConvertFrom-Json } else { $null }
 $ssidPattern = if ($config -and $config.ssidPattern) { $config.ssidPattern } else { 'gomaterials' }
 $laptopVendors = 'Intel|Liteon|AzureWave|Realtek|MediaTek|Qualcomm|Atheros|Rivet Networks|Killer|Dell|Lenovo|Hewlett[- ]Packard(?! Enterprise)|HP Inc|Fugui|Microsoft|Hon Hai|Foxconn|Cloud Network Technology|Compal|Quanta|Wistron|Pegatron|ASUSTek|Acer|Framework|Universal Global Scientific'
-$infraNames = 'printer|print|brother|epson|canon|xerox|ricoh|kyocera|tv|roku|chromecast|sonos|camera|nvr|nas|synology|switch|^ap-|unifi|meraki|router|gateway'
+$infraNames = 'printer|print|brother|epson|canon|xerox|ricoh|kyocera|tv|roku|chromecast|sonos|camera|nvr|nas|synology|switch|^ap-|unifi|meraki|router|gateway|^BR[WN][0-9A-F]{12}$|^NPI[0-9A-F]{6}|^HP[0-9A-F]{6}$|^CANON|^EPSON'   # default printer names: Brother BRW/BRN + MAC, HP NPI/HP + MAC, Canon, Epson
 
 function ConvertTo-Num([string]$ip) {
     $b = ([System.Net.IPAddress]::Parse($ip)).GetAddressBytes()
@@ -173,9 +173,22 @@ if ($SaveBaseline) {
 # --- 4. Drop always-on devices and estimate ----------------------------------
 $baseline = @{}
 if (Test-Path $baselineFile) { (Get-Content $baselineFile -Raw | ConvertFrom-Json) | ForEach-Object { $baseline[$_.MAC] = $true } }
+# Devices whose name once showed they're printers / TVs / network gear (name lookups don't always answer in time, so
+# remember them by MAC). Found 2026-11-26: a Brother printer (BRW + MAC, Fugui Wi-Fi chip) was counted as a laptop.
+$infraFile = Join-Path $here 'headcount-infra.json'
+$infra = @{}
+if (Test-Path $infraFile) { @(Get-Content $infraFile -Raw | ConvertFrom-Json) | ForEach-Object { $infra[$_.MAC] = $_.Name } }
+$infraNew = $false
 foreach ($d in $devices) {
     if ($baseline[$d.MAC]) { $d.Type = 'Baseline' }
-    elseif ($d.Name -and $d.Name -match $infraNames) { $d.Type = 'Other' }
+    elseif ($d.Name -and $d.Name -match $infraNames) {
+        $d.Type = 'Other'
+        if (-not $infra.ContainsKey($d.MAC)) { $infra[$d.MAC] = $d.Name; $infraNew = $true }
+    }
+    elseif ($infra.ContainsKey($d.MAC)) { $d.Type = 'Other'; if (-not $d.Name) { $d.Name = $infra[$d.MAC] + ' (remembered)' } }
+}
+if ($infraNew) {
+    try { @($infra.GetEnumerator() | ForEach-Object { [pscustomobject]@{ MAC = $_.Key; Name = $_.Value } }) | ConvertTo-Json | Set-Content -Encoding UTF8 $infraFile } catch {}
 }
 
 if ($ShowDevices) {
