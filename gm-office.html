@@ -76,6 +76,7 @@
     ?turkey=1       the Thanksgiving turkey comes in now (November only otherwise; ?turkey=0 = never)
     ?flock=1        the US Thanksgiving flock of 6-9 turkeys, any day (?flock=0 = not even on Thanksgiving)
     ?xmas=1         the Christmas tree in the bottom-right corner, any day (December only otherwise; ?xmas=0 = never)
+    ?gifts=8        that many presents under the tree, 0-16 (otherwise 1 on Dec 1, growing to 16 by Dec 25)
     ?reindeer=1     the red-nosed Christmas reindeer comes in now (December only otherwise, once an hour; ?reindeer=0 = never)
   Keys: N night, D day, C real clock, W cycle weather, B say a one-liner now, F fullscreen
 
@@ -647,6 +648,7 @@ const TABLES = [
 for (const t of TABLES) blockRect(t.x0, t.y0, t.x1, t.y1);
 const TREE_CORNER = { x0: 46, x1: 47, y0: 24, y1: 26 };   // bottom-right corner: the Christmas tree's spot (kept clear all year, so screens agree)
 blockRect(TREE_CORNER.x0, TREE_CORNER.y0, TREE_CORNER.x1, TREE_CORNER.y1);
+blockRect(43, 25, 45, 26);   // and the floor left of it, where the presents pile up
 
 const CHAIR_COLS = ['#bab3a8', '#bab3a8', '#d6a24a', '#c9c1b4'];   // warm grey and mustard (office photos)
 const SEATS = [];
@@ -2104,7 +2106,7 @@ function addDecor_() {   // into the sorted scene (buildDrawables)
 const CHRISTMAS = params.has('xmas') ? params.get('xmas') !== '0' : zoneDay_().key.split('-')[1] === '12';
 const TREE_PAL = { Y: '#f2c43c', y: '#fff0a0', G: '#2f8a46', g: '#1e6534', D: '#174d28', W: '#6b4226', P: '#c22a2a', p: '#8e1c1c',
   R: '#d9302a', B: '#3b6fd6', S: '#e8e2f0', K: '#3b6fd6', k: '#2a4fa0', Q: '#d9453b', q: '#a8302a', T: '#f2ebe0' };
-const TREE_ROWS = (() => {   // 16 x 31, drawn from tiers: star, three layers of branches, trunk, pot, two presents
+const TREE_ROWS = (() => {   // 16 x 31, drawn from tiers: star, three layers of branches, trunk, pot
   const rows = [];
   const tiers = [[3, 9, 1, 4], [8, 16, 2, 6], [14, 24, 3, 8]];   // [first row, last row, half-width at top, at bottom]
   for (let j = 0; j < 31; j++) {
@@ -2118,10 +2120,6 @@ const TREE_ROWS = (() => {   // 16 x 31, drawn from tiers: star, three layers of
     if (j === 25 || j === 26) { a[7] = a[8] = 'W'; }
     if (j === 27) for (let i = 5; i <= 10; i++) a[i] = 'P';
     if (j >= 28 && j <= 30) for (let i = 6; i <= 9; i++) a[i] = j === 30 ? 'p' : 'P';
-    if (j >= 26 && j <= 30) {   // presents: blue with a white ribbon (left), red with a gold one (right)
-      for (let i = 0; i <= 4; i++) a[i] = j === 26 ? 'S' : i === 2 ? 'S' : j === 28 ? 'S' : j === 30 ? 'k' : 'K';
-      if (j >= 28) for (let i = 12; i <= 15; i++) a[i] = i === 13 || j === 29 ? 'Y' : j === 30 ? 'q' : 'Q';
-    }
     rows.push(a.join(''));
   }
   for (const [i, j, c] of [[7, 6, 'R'], [6, 11, 'B'], [9, 13, 'R'], [5, 17, 'S'], [10, 18, 'B'], [8, 21, 'R'], [3, 22, 'B'], [12, 22, 'S']])   // baubles
@@ -2130,6 +2128,25 @@ const TREE_ROWS = (() => {   // 16 x 31, drawn from tiers: star, three layers of
 })();
 const TREE_LIGHTS = [[8, 5], [6, 8], [9, 9], [5, 12], [8, 14], [11, 15], [4, 16], [7, 18], [12, 19], [3, 20], [6, 22], [10, 23], [13, 23], [9, 17]];
 const TREE_LIGHT_COLS = ['#ff4a4a', '#ffd84a', '#5ab8ff', '#6aff8a', '#ff8af0'];
+// Presents under the tree pile up through Advent: 1 on Dec 1, all 16 by Dec 25 (and through the rest of December).
+// From the date, so every screen agrees. ?gifts=N shows N (0-16).
+// [x, bottom y, w, h] in office px, in the order they arrive: near the pot first, then spreading left, then stacked
+const GIFT_SLOTS = [[368, 216, 5, 5], [379, 216, 5, 4], [362, 216, 6, 6], [356, 216, 5, 4], [369, 211, 4, 3], [350, 216, 6, 5],
+  [363, 210, 4, 3], [380, 212, 3, 3], [344, 216, 5, 5], [357, 212, 4, 3], [351, 211, 4, 3], [345, 211, 3, 2], [364, 207, 3, 2],
+  [374, 216, 4, 2], [352, 208, 3, 2], [358, 209, 3, 2]];
+const GIFT_COLS = [['#d9302a', '#f2c43c'], ['#2f8a46', '#f2ebe0'], ['#3b6fd6', '#f2ebe0'], ['#f2c43c', '#d9302a'], ['#8b5cf6', '#f2c43c'], ['#f2ebe0', '#d9302a']];
+const GIFT_N = (() => {
+  if (params.has('gifts')) return Math.max(0, Math.min(GIFT_SLOTS.length, parseInt(params.get('gifts')) || 0));
+  const [, mo, d] = zoneDay_().key.split('-').map(Number);
+  return mo === 12 ? Math.ceil(Math.min(d, 25) * GIFT_SLOTS.length / 25) : GIFT_SLOTS.length;
+})();
+const GIFTS = GIFT_SLOTS.slice(0, GIFT_N).map((sl, k) => [...sl, GIFT_COLS[(k * 5 + 2) % GIFT_COLS.length]]).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+function drawGift_([x, yb, w, h, [c, rb]]) {
+  const top = yb - h, cx = x + (w >> 1);
+  box(x, top, w, h, c); R(x, top, w, 1, mixC(c, '#ffffff', 0.3)); if (h > 2) R(x, yb - 1, w, 1, shade(c, 0.78));
+  R(cx, top, 1, h, rb); if (h > 2) R(x, top + (h >> 1), w, 1, rb);   // ribbon
+  P(cx - 1, top - 1, rb); P(cx + 1, top - 1, rb);   // bow
+}
 let TREE_SPR = null;
 function drawXmasTree_() {
   if (!TREE_SPR) TREE_SPR = bakeRows(TREE_ROWS, TREE_PAL);
@@ -2139,6 +2156,7 @@ function drawXmasTree_() {
   const t = TIME * 1.3 | 0;
   TREE_LIGHTS.forEach(([i, j], k) => { if ((t + k * 3) % 5 !== 0) P(x + i, y + j, TREE_LIGHT_COLS[(k + (t >> 2)) % TREE_LIGHT_COLS.length]); });
   if ((TIME * 0.8 | 0) % 2) P(x + 7, y, '#ffffff');   // the star glints
+  for (const gf of GIFTS) drawGift_(gf);
   lights.push({ x: x + 8, y: y + 14, r: 22, a: 0.5, c: '#ffd890' });   // a warm glow after dark
 }
 // the snack pile: an orange bowl heaped with wrapped candy on the island, full in the morning and running low by
