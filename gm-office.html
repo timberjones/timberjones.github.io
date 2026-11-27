@@ -2297,7 +2297,7 @@ const WINDOWS = OFFICES.map((o, i) => {
   return { x, y: -17, w, h: 12 };
 });
 
-const CLOCK = { x: 341, y: -11 };
+const CLOCK = { x: 341, y: -11, w: 30, h: 14 };   // the conference room's digital wall clock (centre, size)
 function buildLayers() {
   bg = canvas(GX * C8 + BGX * 2, GY * C8 + BGY + 12);
   g = bg.getContext('2d', RD); g.translate(BGX, BGY);
@@ -2396,9 +2396,10 @@ function buildLayers() {
   for (const w of WINDOWS) g.clearRect(w.x, w.y, w.w, w.h);
   // office dividers (white walls) meeting the north wall
   for (const x of DIVIDERS) { R(x * C8 + 2, -3, 4, 8 * C8 + 3, OUT); R(x * C8 + 3, -3, 2, 8 * C8 + 3, WALL); }
-  // wall clock face
-  for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) { const d2 = dx * dx + dy * dy; if (d2 <= 30) P(CLOCK.x + dx, CLOCK.y + dy, '#fbf8ee'); else if (d2 <= 44) P(CLOCK.x + dx, CLOCK.y + dy, '#2b2f3a'); }
-  for (const [dx, dy] of [[0, -5], [0, 5], [-5, 0], [5, 0]]) P(CLOCK.x + dx, CLOCK.y + dy, '#2b2f3a');
+  // digital wall clock: a dark display (the time itself is drawn crisp on the screen canvas, see drawClockDigits_)
+  box(CLOCK.x - CLOCK.w / 2, CLOCK.y - CLOCK.h / 2, CLOCK.w, CLOCK.h, '#2b2f3a');
+  R(CLOCK.x - CLOCK.w / 2 + 1, CLOCK.y - CLOCK.h / 2 + 1, CLOCK.w - 2, CLOCK.h - 2, '#121318');
+  R(CLOCK.x - CLOCK.w / 2, CLOCK.y - CLOCK.h / 2, CLOCK.w, 1, '#4a5060');
 
   // window frames on top of the sky
   wallFG = canvas(bg.width, bg.height); g = wallFG.getContext('2d', RD); g.translate(BGX, BGY);
@@ -2514,14 +2515,22 @@ function drawWindowsCached_() {
   g.drawImage(c.cv, 0, 0, c.cv.width, c.cv.height, c.x0, c.y0, c.w, c.h);
   if (night < 0.95) for (const win of WINDOWS) lights.push({ x: win.x + win.w / 2, y: 6, r: 22, a: (1 - night) * 0.8 });   // every frame, as before
 }
-// live Eastern time (frozen only when ?hour= is used); the red second hand ticks so it reads as a real clock
-function drawClockHands() {
-  const h = world.hour, m = (h % 1) * 60, s = Math.floor((h * 3600) % 60);
-  const am = m / 60 * Math.PI * 2 - Math.PI / 2, ah = ((h % 12) + m / 60) / 12 * Math.PI * 2 - Math.PI / 2, as = s / 60 * Math.PI * 2 - Math.PI / 2;
-  line(CLOCK.x, CLOCK.y, CLOCK.x + Math.cos(ah) * 3, CLOCK.y + Math.sin(ah) * 3, '#2b2f3a');
-  line(CLOCK.x, CLOCK.y, CLOCK.x + Math.cos(am) * 5, CLOCK.y + Math.sin(am) * 5, '#2b2f3a');
-  line(CLOCK.x, CLOCK.y, CLOCK.x + Math.cos(as) * 5, CLOCK.y + Math.sin(as) * 5, '#d9453b');
-  P(CLOCK.x, CLOCK.y, '#d9453b');
+// live Eastern time (frozen only when ?hour= is used), 12-hour like 3:16 (no am/pm); the colon blinks every second.
+// Drawn on the screen canvas after the scene, in a system font, so it's sharp and readable across the room.
+function drawClockDigits_() {
+  const h = world.hour, hh = Math.floor(h) % 12 || 12, mm = Math.floor((h % 1) * 60), colon = Math.floor(h * 3600) % 2 === 0;
+  const c = mctx, cx = (OX + CLOCK.x) * scale, cy = (OY + CLOCK.y) * scale, ih = (CLOCK.h - 3) * scale;
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+  c.font = `700 ${Math.round(ih * 0.95)}px Consolas, "Courier New", monospace`; c.textBaseline = 'middle';
+  c.fillStyle = '#ff4a3a'; c.shadowColor = 'rgba(255,60,40,0.7)'; c.shadowBlur = scale * 1.5;
+  const hs = String(hh), ms = String(mm).padStart(2, '0'), cw = c.measureText('0').width, gap = cw * 0.55;
+  const total = cw * (hs.length + 2) + gap;   // fixed width per digit, so it doesn't jiggle as the minutes change
+  let x = cx - total / 2;
+  c.textAlign = 'center';
+  for (const ch of hs) { c.fillText(ch, x + cw / 2, cy + scale * 0.5); x += cw; }
+  if (colon) c.fillText(':', x + gap / 2, cy); x += gap;
+  for (const ch of ms) { c.fillText(ch, x + cw / 2, cy + scale * 0.5); x += cw; }
+  c.restore();
 }
 
 // ---------------------------------------------------------------- furniture drawing (row by row for depth)
@@ -3378,7 +3387,6 @@ function render() {
   g.drawImage(hiL && wallFG2 || wallFG, -BGX, -BGY, bg.width, bg.height);
   if (!CLASSIC) drawWindowLight_();
   if (wet.length) drawWet_();
-  drawClockHands();
   for (const d of ROOM_DOORS) { const busy = d.kind === 'wc' && SPOTS.wc.spots.some(s => s.door === d.x && s.using && s.using.hidden); P(d.x * C8 + 6, 21 * C8 + 4, busy ? '#d9453b' : '#22b573'); }
   const list = STATIC.slice();
   for (const w of workers) if (w.present) list.push({ key: w.py + C8 + 0.5, draw: () => w.isDog ? drawDog(w) : drawPerson(w) });
@@ -3437,6 +3445,7 @@ function render() {
   if (epxOn) { drawEpx_(); mctx.drawImage(epx.cv, 0, 0); } else mctx.drawImage(view, 0, 0, VW * scale, VH * scale);
   drawSecretArt_();   // the QR art, at whole screen pixels, after the grade (full contrast for phones)
   drawTriviaBest_();
+  drawClockDigits_();
   drawSpeech();
 }
 // Secret plant trivia (played on gm-user.html by walking into the washroom): today's best score, written faintly on
