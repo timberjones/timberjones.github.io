@@ -76,6 +76,7 @@
     ?turkey=1       the Thanksgiving turkey comes in now (November only otherwise; ?turkey=0 = never)
     ?flock=1        the US Thanksgiving flock of 6-9 turkeys, any day (?flock=0 = not even on Thanksgiving)
     ?xmas=1         the Christmas tree in the bottom-right corner, any day (December only otherwise; ?xmas=0 = never)
+    ?aim=1          show the point-and-pick corner markers all the time (testing gm-user.html's camera)
     ?gifts=8        that many presents under the tree, 0-16 (otherwise 1 on Dec 1, growing to 16 by Dec 25)
     ?reindeer=1     the red-nosed Christmas reindeer comes in now (December only otherwise, once an hour; ?reindeer=0 = never)
   Keys: N night, D day, C real clock, W cycle weather, B say a one-liner now, F fullscreen
@@ -95,6 +96,10 @@ const IS_TV = /SMART-TV|SmartTV|Tizen|Web0S|WebOS|NetCast|HbbTV|BRAVIA|AFT[A-Z]|
 try { localStorage.removeItem('gmo-perf'); } catch (e) {}   // left by a short-lived lag guard (Nov 2026); start clean
 const FPS = Math.max(15, Math.min(60, parseInt(params.get('fps')) || (IS_TV ? 30 : 60)));
 const C8 = 8, GX = 48, GY = 28;          // 8px grid cells; x 0-5 is the entrance corridor, x 6-47 the office
+// Point-and-pick (gm-user.html "Point at the TV"): while a phone aims its camera, every screen draws a QR-style finder
+// square centred on each of these office px spots (top-left, top-right, bottom-left, bottom-right); the phone finds
+// them in the picture, so it knows which office spot is under its crosshair, on any size of screen.
+const AIM_MARKS = [[60, 12], [372, 12], [60, 204], [372, 204]];
 const WALK = 30;                          // px per second
 const OUT = params.get('style') === 'classic' ? '#1a1c3a' : '#33251f';   // outline: warm dark brown (cozy style); classic = navy
 
@@ -2515,6 +2520,32 @@ function drawWindowsCached_() {
   g.drawImage(c.cv, 0, 0, c.cv.width, c.cv.height, c.x0, c.y0, c.w, c.h);
   if (night < 0.95) for (const win of WINDOWS) lights.push({ x: win.x + win.w / 2, y: 6, r: 22, a: (1 - night) * 0.8 });   // every frame, as before
 }
+// Point-and-pick: a phone on gm-user.html is aiming at us (relay 'aim', repeated every few seconds while it aims):
+// draw the 4 finder squares at AIM_MARKS, pure black and white on the screen canvas, big enough for a phone across the room.
+let aimUntil = params.get('aim') === '1' ? Infinity : 0;   // ?aim=1 keeps them on (testing)
+function drawAimMarks_() {
+  if (Date.now() > aimUntil) return;
+  const c = mctx, m = Math.max(3, Math.round(cv.height / 70));   // module px: 15 on a 1080p TV
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+  for (const [ax, ay] of AIM_MARKS) {
+    const x = Math.round((OX + ax) * scale - 3.5 * m), y = Math.round((OY + ay) * scale - 3.5 * m);
+    c.fillStyle = '#ffffff'; c.fillRect(x - 2 * m, y - 2 * m, 11 * m, 11 * m);   // quiet zone
+    c.fillStyle = '#000000'; c.fillRect(x, y, 7 * m, 7 * m);
+    c.fillStyle = '#ffffff'; c.fillRect(x + m, y + m, 5 * m, 5 * m);
+    c.fillStyle = '#000000'; c.fillRect(x + 2 * m, y + 2 * m, 3 * m, 3 * m);
+  }
+  c.restore();
+}
+// who's at office px (x, y)? The person (with a user id) whose body is nearest, within about a cell and a half
+function pickAt_(x, y) {
+  let best = null, bd = 13;
+  for (const w of workers) {
+    if (!w.present || w.hidden || !w.v || !w.v.uid || w.px < 0) continue;
+    const d = Math.hypot(w.px + 4 - x, w.py - 2 - y);   // the middle of the sprite (it stands on its cell, head above)
+    if (d < bd) { bd = d; best = w; }
+  }
+  return best ? baseUid_(best.v.uid) : null;
+}
 // live Eastern time (frozen only when ?hour= is used), 12-hour like 3:16 (no am/pm); the colon blinks every second.
 // Drawn on the screen canvas after the scene, in a system font, so it's sharp and readable across the room.
 function drawClockDigits_() {
@@ -3446,6 +3477,7 @@ function render() {
   drawSecretArt_();   // the QR art, at whole screen pixels, after the grade (full contrast for phones)
   drawTriviaBest_();
   drawClockDigits_();
+  drawAimMarks_();
   drawSpeech();
 }
 // Secret plant trivia (played on gm-user.html by walking into the washroom): today's best score, written faintly on
@@ -3643,6 +3675,8 @@ function onRelay_(m) {
   }
   if (m.t === 'poke') { if (syncMode !== 'follow') { const w = whoAt_(m.i); if (w && w.present && !w.hidden) poke_(w); } return; }
   if (m.t === 'trivia') { triviaBest = m; return; }
+  if (m.t === 'aim') { aimUntil = m.on ? Date.now() + 12000 : 0; return; }   // a phone is pointing at the TV
+  if (m.t === 'pick') { if (syncMode !== 'follow' && typeof m.r === 'string') relaySend_({ t: 'picked', r: m.r, uid: pickAt_(+m.x, +m.y) }); return; }
   if (m.t === 'state') {   // (re)connected: everyone's looks, and exactly these people are driving right now
     if (m.trivia) triviaBest = m.trivia;
     for (const [uid, look] of Object.entries(m.looks || {})) applyLook_(uid, look);

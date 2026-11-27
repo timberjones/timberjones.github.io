@@ -38,6 +38,17 @@
   .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); font-weight: 500; }
   .or { text-align: center; color: var(--muted); margin: 14px 0; font-size: 0.9rem; }
   #newBtn { width: 100%; }
+  #aimBtn { width: 100%; margin-bottom: 8px; }
+  /* ---- point the camera at the TV and pick someone */
+  #aim { position: fixed; inset: 0; z-index: 50; background: #000; color: #fff; display: flex; flex-direction: column; gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); }
+  #aim .aimbox { position: relative; flex: 1; min-height: 0; }
+  #aim video, #aim canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #aim video { object-fit: contain; }
+  #aim canvas { touch-action: none; cursor: crosshair; }
+  #aimMsg { margin: 0; text-align: center; font-size: 0.95rem; min-height: 2.8em; }
+  #aim .btn:disabled { opacity: 0.45; cursor: default; }
+  #aimClose { color: #fff; }
   #again { margin-top: 14px; font-size: 0.9rem; color: var(--muted); }
   #again button { background: none; border: 0; padding: 0; color: var(--ink); text-decoration: underline; cursor: pointer; }
   #pickErr { color: #d9453b; font-size: 0.9rem; margin-top: 8px; min-height: 1.2em; }
@@ -135,10 +146,17 @@
     </form>
     <div id="pickErr"></div>
     <div class="or">or</div>
+    <button id="aimBtn" class="btn ghost" type="button">Point your camera at the TV</button>
     <button id="newBtn" class="btn ghost" type="button">I'm new here</button>
     <div id="again" class="hidden">Last time: <button id="againBtn" type="button"></button></div>
   </div>
 </main>
+
+<section id="aim" class="hidden" aria-label="Point your camera at the TV">
+  <div class="aimbox"><video id="aimVideo" playsinline muted></video><canvas id="aimCanvas"></canvas></div>
+  <p id="aimMsg"></p>
+  <div class="trow"><button class="btn" id="aimTake" type="button" disabled>Take control</button><button class="btn ghost" id="aimClose" type="button">Cancel</button></div>
+</section>
 
 <main id="play" class="hidden">
   <div class="top">
@@ -672,6 +690,187 @@ $('idForm').addEventListener('submit', e => { e.preventDefault(); startAs($('idI
 $('newBtn').addEventListener('click', () => startAs(newId()));
 $('againBtn').addEventListener('click', () => startAs(store.get('gmOfficeUid')));
 $('switchBtn').addEventListener('click', showPick);
+
+// ---- point the camera at the TV and pick someone
+// The phone joins the relay as a plain viewer and sends 'aim' every few seconds: every office screen then draws 4
+// QR-style finder squares at AIM_MARKS (office px). We find those squares in the camera picture (1:1:3:1:1 dark/light
+// runs across and down, like a QR reader), map the picture to office px through them (a homography), and ask the
+// office who's under the crosshair ('pick'); the leading screen answers 'picked' with their id. Drag (or tap) to move
+// the crosshair. The whole TV has to be in the picture.
+const aim = { on: false, ws: null, stream: null, ping: 0, loop: 0, marks: null, marksAt: 0, cross: null, H: null, uid: null, sentAt: 0, sent: null, proc: null };
+function aimSend(m) { try { if (aim.ws && aim.ws.readyState === 1) aim.ws.send(JSON.stringify(m)); } catch (e) {} }
+async function openAim() {
+  $('aim').classList.remove('hidden'); $('aimTake').disabled = true; $('aimTake').textContent = 'Take control';
+  $('aimMsg').textContent = 'Starting the camera…';
+  Object.assign(aim, { on: true, marks: null, H: null, uid: null, cross: null, sent: null });
+  try {
+    aim.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) { $('aimMsg').textContent = 'Could not open the camera. Allow camera access for this page, or type the id instead.'; return; }
+  if (!aim.on) { aim.stream.getTracks().forEach(t => t.stop()); aim.stream = null; return; }
+  const v = $('aimVideo'); v.srcObject = aim.stream;
+  try { await v.play(); } catch (e) {}
+  try {
+    const ws = new WebSocket(RELAY_URL + '?v=2'); aim.ws = ws;
+    ws.onopen = () => aimSend({ t: 'aim', on: true });
+    ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (er) { return; } if (m && m.t === 'picked' && aim.H) setPicked(m.uid); };
+  } catch (e) {}
+  aim.ping = setInterval(() => aimSend({ t: 'aim', on: true }), 5000);   // the screens keep their markers up for 12 s after each
+  $('aimMsg').textContent = 'Show the whole TV. Looking for the 4 corner squares…';
+  aim.loop = setInterval(aimTick, 120);
+}
+function closeAim() {
+  aim.on = false; clearInterval(aim.ping); clearInterval(aim.loop);
+  aimSend({ t: 'aim', on: false });
+  if (aim.ws) { const ws = aim.ws; setTimeout(() => { try { ws.close(); } catch (e) {} }, 200); aim.ws = null; }
+  if (aim.stream) aim.stream.getTracks().forEach(t => t.stop());
+  aim.stream = null; $('aimVideo').srcObject = null;
+  $('aim').classList.add('hidden');
+}
+function setPicked(uid) {
+  aim.uid = uid || null;
+  $('aimTake').disabled = !aim.uid;
+  $('aimTake').textContent = aim.uid ? 'Take control of ' + aim.uid : 'Take control';
+  if (aim.H) $('aimMsg').textContent = aim.uid ? (knownSeat(aim.uid) ? 'User ' : 'Person ') + aim.uid + ' is under the crosshair.' : 'Found the TV. Move the crosshair onto someone.';
+}
+// the video's picture inside the box (object-fit: contain): scale and offset, in CSS px
+function videoRect() {
+  const v = $('aimVideo'), bw = v.clientWidth, bh = v.clientHeight, vw = v.videoWidth || 1, vh = v.videoHeight || 1, k = Math.min(bw / vw, bh / vh);
+  return { k, ox: (bw - vw * k) / 2, oy: (bh - vh * k) / 2, vw, vh };
+}
+function moveCross(e) {
+  const r = $('aimCanvas').getBoundingClientRect(), vr = videoRect();
+  aim.cross = [Math.max(0, Math.min(vr.vw, (e.clientX - r.left - vr.ox) / vr.k)), Math.max(0, Math.min(vr.vh, (e.clientY - r.top - vr.oy) / vr.k))];
+}
+$('aimCanvas').addEventListener('pointerdown', e => { e.preventDefault(); $('aimCanvas').setPointerCapture(e.pointerId); moveCross(e); });
+$('aimCanvas').addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'touch') moveCross(e); });
+
+function aimTick() {
+  const v = $('aimVideo');
+  if (!aim.on || !v.videoWidth) return;
+  const vw = v.videoWidth, vh = v.videoHeight, k = Math.min(1, 800 / Math.max(vw, vh)), pw = Math.round(vw * k), ph = Math.round(vh * k);
+  if (!aim.proc) aim.proc = document.createElement('canvas');
+  const pc = aim.proc; if (pc.width !== pw || pc.height !== ph) { pc.width = pw; pc.height = ph; }
+  const cx = pc.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, pw, ph);
+  const found = findMarks(cx.getImageData(0, 0, pw, ph), pw, ph);
+  if (found) { aim.marks = found.map(([x, y]) => [x / k, y / k]); aim.marksAt = performance.now(); }
+  else if (performance.now() - aim.marksAt > 1200) aim.marks = null;   // keep the last find for a moment (a blurry frame)
+  if (!aim.cross) aim.cross = [vw / 2, vh / 2];
+  aim.H = aim.marks ? homography(aim.marks, AIM_MARKS) : null;
+  if (!aim.H) { if (aim.uid) setPicked(null); $('aimMsg').textContent = 'Show the whole TV. Looking for the 4 corner squares…'; }
+  else {
+    const [ox, oy] = applyH(aim.H, aim.cross[0], aim.cross[1]), now = performance.now();
+    const moved = !aim.sent || Math.hypot(ox - aim.sent[0], oy - aim.sent[1]) > 1.5;
+    if ((moved && now - aim.sentAt > 250) || now - aim.sentAt > 1500) { aim.sent = [ox, oy]; aim.sentAt = now; aimSend({ t: 'pick', x: ox, y: oy }); }
+    if (!aim.uid) $('aimMsg').textContent = 'Found the TV. Move the crosshair onto someone.';
+  }
+  drawAim();
+}
+function drawAim() {
+  const c = $('aimCanvas'), dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const g = c.getContext('2d'), vr = videoRect(), P = ([x, y]) => [vr.ox + x * vr.k, vr.oy + y * vr.k];
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  if (aim.marks) {   // the TV outline through the 4 squares (TL, TR, BR, BL)
+    g.strokeStyle = '#22b573'; g.lineWidth = 2; g.beginPath();
+    [0, 1, 3, 2, 0].forEach((i, n) => { const [x, y] = P(aim.marks[i]); if (n) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke();
+    g.fillStyle = '#22b573'; for (const m of aim.marks) { const [x, y] = P(m); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
+  }
+  if (aim.cross) {
+    const [x, y] = P(aim.cross), col = aim.uid ? '#22b573' : '#ffffff';
+    g.beginPath(); g.arc(x, y, 14, 0, 7);
+    g.moveTo(x - 24, y); g.lineTo(x - 6, y); g.moveTo(x + 6, y); g.lineTo(x + 24, y); g.moveTo(x, y - 24); g.lineTo(x, y - 6); g.moveTo(x, y + 6); g.lineTo(x, y + 24);
+    g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.stroke();
+    g.lineWidth = 2; g.strokeStyle = col; g.stroke();
+    if (aim.uid) { g.font = '600 15px system-ui, sans-serif'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.strokeText(aim.uid, x, y - 30); g.fillStyle = '#fff'; g.fillText(aim.uid, x, y - 30); }
+  }
+}
+// QR-style finder squares: dark / light / dark / light / dark runs in a 1:1:3:1:1 ratio, across a row and down a
+// column through the same centre. Returns 4 centres [TL, TR, BL, BR] in picture px, or null.
+function findMarks(img, w, h) {
+  const d = img.data, n = w * h, gray = new Uint8Array(n);
+  for (let i = 0; i < n; i++) gray[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8;
+  const W = w + 1, S = new Float64Array(W * (h + 1));   // integral image for the local average
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += gray[y * w + x]; S[(y + 1) * W + x + 1] = S[y * W + x + 1] + row; } }
+  const r = Math.max(6, Math.round(Math.max(w, h) / 20)), dark = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      const mean = (S[y1 * W + x1] - S[y0 * W + x1] - S[y1 * W + x0] + S[y0 * W + x0]) / ((x1 - x0) * (y1 - y0));
+      dark[y * w + x] = gray[y * w + x] < mean * 0.85 ? 1 : 0;
+    }
+  }
+  const ok = st => {   // 1:1:3:1:1, loosely
+    const tot = st[0] + st[1] + st[2] + st[3] + st[4];
+    if (tot < 7) return false;
+    const m = tot / 7, v = m / 1.5;
+    return Math.abs(st[0] - m) < v && Math.abs(st[1] - m) < v && Math.abs(st[2] - 3 * m) < 3 * v && Math.abs(st[3] - m) < v && Math.abs(st[4] - m) < v;
+  };
+  const B = (x, y) => dark[y * w + x];
+  function crossV(x, y0, tot) {   // the same pattern down column x through row y0: its centre row, or NaN
+    const st = [0, 0, 0, 0, 0], max = tot; let y = y0;
+    while (y >= 0 && B(x, y)) { st[2]++; y--; }
+    while (y >= 0 && !B(x, y) && st[1] <= max) { st[1]++; y--; }
+    while (y >= 0 && B(x, y) && st[0] <= max) { st[0]++; y--; }
+    if (y < 0 || st[1] > max || st[0] > max) return NaN;
+    y = y0 + 1;
+    while (y < h && B(x, y)) { st[2]++; y++; }
+    while (y < h && !B(x, y) && st[3] <= max) { st[3]++; y++; }
+    while (y < h && B(x, y) && st[4] <= max) { st[4]++; y++; }
+    if (y >= h || st[3] > max || st[4] > max) return NaN;
+    const t2 = st[0] + st[1] + st[2] + st[3] + st[4];
+    if (Math.abs(t2 - tot) * 5 >= tot * 2 || !ok(st)) return NaN;
+    return y - st[4] - st[3] - st[2] / 2;
+  }
+  const cands = [];
+  for (let y = 0; y < h; y++) {
+    const runs = [], cols = [], starts = [];
+    let x = 0;
+    while (x < w) { const c = B(x, y), s0 = x; while (x < w && B(x, y) === c) x++; runs.push(x - s0); cols.push(c); starts.push(s0); }
+    for (let k = 0; k + 4 < runs.length; k++) {
+      if (!cols[k]) continue;
+      const st = runs.slice(k, k + 5);
+      if (!ok(st)) continue;
+      const tot = st[0] + st[1] + st[2] + st[3] + st[4], cx = starts[k + 2] + st[2] / 2, cy = crossV(Math.round(cx), y, tot);
+      if (!isNaN(cy)) cands.push([cx, cy, tot / 7]);
+    }
+  }
+  const cl = [];   // group the hits: one group per square
+  for (const [x, y, m] of cands) {
+    const g = cl.find(c => Math.hypot(c.x - x, c.y - y) < Math.max(4, c.m * 3));
+    if (g) { g.x = (g.x * g.n + x) / (g.n + 1); g.y = (g.y * g.n + y) / (g.n + 1); g.m = (g.m * g.n + m) / (g.n + 1); g.n++; }
+    else cl.push({ x, y, m, n: 1 });
+  }
+  // the markers are by far the biggest squares on the TV (the office's secret QR art has small ones): take the 4 biggest
+  const best = cl.filter(c => c.n >= 3).sort((a, b) => b.m - a.m).slice(0, 4);
+  if (best.length < 4) return null;
+  const by = f => best.slice().sort((a, b) => f(a) - f(b));
+  const tl = by(c => c.x + c.y)[0], br = by(c => -(c.x + c.y))[0], tr = by(c => c.y - c.x)[0], bl = by(c => c.x - c.y)[0];
+  if (new Set([tl, tr, bl, br]).size < 4) return null;
+  return [tl, tr, bl, br].map(c => [c.x, c.y]);
+}
+// the 3x3 homography taking 4 picture points to 4 office points (solved as 8 linear equations), and applying it
+function homography(src, dst) {
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y, u], [0, 0, 0, x, y, 1, -v * x, -v * y, v]);
+  }
+  for (let c = 0; c < 8; c++) {
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    if (Math.abs(A[p][c]) < 1e-9) return null;
+    [A[c], A[p]] = [A[p], A[c]];
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = A[r][c] / A[c][c]; for (let k = c; k < 9; k++) A[r][k] -= f * A[c][k]; }
+  }
+  return A.map((row, i) => row[8] / row[i]).concat(1);
+}
+function applyH(H, x, y) { const z = H[6] * x + H[7] * y + 1; return [(H[0] * x + H[1] * y + H[2]) / z, (H[3] * x + H[4] * y + H[5]) / z]; }
+$('aimBtn').addEventListener('click', () => {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('pickErr').textContent = 'This browser cannot use the camera here. Type the id instead.'; return; }
+  openAim();
+});
+$('aimClose').addEventListener('click', closeAim);
+$('aimTake').addEventListener('click', () => { const uid = aim.uid; if (!uid) return; closeAim(); startAs(uid); });
 
 // ---- go
 let last = performance.now();

@@ -22,6 +22,9 @@
 // It sends { t: 'snap' } (who's where) while other viewers are watching ({ t: 'peers', n }); we pass it on and keep
 // the latest for screens that join. A viewer that hears nothing for a few seconds sends 'claim' and takes over if
 // we haven't heard from the leader either. A click on a follower is sent to the leader as 'poke'.
+// Point-and-pick (gm-user.html): a phone connects as a plain viewer, sends 'aim' (every screen shows 4 corner markers
+// while it aims) and 'pick' { x, y } (the office spot under its crosshair); the leader answers 'picked' { uid } and we
+// pass that to that phone only.
 import { DurableObject } from 'cloudflare:workers';
 
 const ORIGINS = [/^https:\/\/timberjones\.github\.io$/, /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/, /^null$/];   // null = a local file
@@ -192,6 +195,18 @@ export class Office extends DurableObject {
     } else if (m.t === 'poke') {
       const i = m.i | 0, L = this.leader_();   // -1 courier, -2 water delivery, -3 / -4 the dogs, -5 the night janitor
       if (L && L !== ws && i >= -5 && i < 200) try { L.send(JSON.stringify({ t: 'poke', i })); } catch (e) {}
+    } else if (m.t === 'aim') {   // a phone pointing its camera at the TV (gm-user.html): every screen shows its corner markers
+      const s = JSON.stringify({ t: 'aim', on: !!m.on });
+      for (const w of this.views_()) if (w !== ws) try { w.send(s); } catch (e) {}
+    } else if (m.t === 'pick') {   // ...and asks who's under its crosshair (office px): the leading screen answers, to this phone only
+      const x = Number(m.x), y = Number(m.y), L = this.leader_();
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !L || L === ws) return;
+      if (!a.pick) { a.pick = Math.random().toString(36).slice(2, 12); ws.serializeAttachment(a); }
+      try { L.send(JSON.stringify({ t: 'pick', x: Math.round(x), y: Math.round(y), r: a.pick })); } catch (e) {}
+    } else if (m.t === 'picked') {
+      if (!a.lead || typeof m.r !== 'string') return;
+      const out = JSON.stringify({ t: 'picked', uid: typeof m.uid === 'string' && /^\d{1,8}$/.test(m.uid) ? m.uid : null });
+      for (const w of this.ctx.getWebSockets('view')) { const b = w.deserializeAttachment(); if (b && b.pick === m.r) try { w.send(out); } catch (e) {} }
     }
   }
 
