@@ -205,7 +205,8 @@ export class Office extends DurableObject {
       try { L.send(JSON.stringify({ t: 'pick', x: Math.round(x), y: Math.round(y), r: a.pick })); } catch (e) {}
     } else if (m.t === 'picked') {
       if (!a.lead || typeof m.r !== 'string') return;
-      const out = JSON.stringify({ t: 'picked', uid: typeof m.uid === 'string' && /^\d{1,8}$/.test(m.uid) ? m.uid : null });
+      const uid = typeof m.uid === 'string' && /^\d{1,8}$/.test(m.uid) ? m.uid : null, look = uid ? cleanLook(m.look, uid) : null;   // look: someone with no user id (the phone can't know it)
+      const out = JSON.stringify(look ? { t: 'picked', uid, look } : { t: 'picked', uid });
       for (const w of this.ctx.getWebSockets('view')) { const b = w.deserializeAttachment(); if (b && b.pick === m.r) try { w.send(out); } catch (e) {} }
     }
   }

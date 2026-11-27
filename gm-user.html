@@ -238,25 +238,41 @@ function startLook(uid) {
 let me = null;   // { uid, home, look, frames, tx, ty, px, py, q, seat, dir, walkT, lookTouched }
 const NEW_ID = '1111';   // the example id: typing it means "make me someone new" (no staff member has it)
 const newId = () => '9' + String(Math.floor(Math.random() * 1e6)).padStart(6, '0');
+// Someone with no user id, or an animal (CHARS, shared from gm-office.html): picked with the camera. Their look
+// comes from the office with the pick (kept here for next time); animals use the office's own sprites.
+const charLook = { get: uid => { try { return JSON.parse(store.get('gmCharLook:' + uid)); } catch (e) { return null; } }, set: (uid, l) => store.set('gmCharLook:' + uid, JSON.stringify(l)) };
+function beastFrames(ch) {
+  if (ch.kind === 'dog') return dogFrames(ch.coat[0], ch.coat[1]);
+  const [R_A, R_B, D_A, D_B, U_A, U_B, pal] = ch.kind === 'reindeer'
+    ? [DEER_R_A, DEER_R_B, DEER_D_A, DEER_D_B, DEER_U_A, DEER_U_B, DEER_PAL] : [TURKEY_R_A, TURKEY_R_B, TURKEY_D_A, TURKEY_D_B, TURKEY_U_A, TURKEY_U_B, TURKEY_PAL];
+  return { rightA: bakeRows(R_A, pal), rightB: bakeRows(R_B, pal), leftA: bakeRows(R_A, pal, true), leftB: bakeRows(R_B, pal, true),
+    downA: bakeRows(D_A, pal), downB: bakeRows(D_B, pal), upA: bakeRows(U_A, pal), upB: bakeRows(U_B, pal) };
+}
+const BEAST_SOUND = { dog: 'Woof', turkey: 'Gobble', reindeer: 'Jingle' };
 function startAs(uid) {
   uid = String(uid).replace(/\D/g, '').slice(0, 8);
   if (!uid) { $('pickErr').textContent = 'Type a user id (numbers only).'; return; }
   if (uid === NEW_ID) uid = newId();
-  store.set('gmOfficeUid', uid);
+  const ch = charOf_(uid);
+  if (!ch) store.set('gmOfficeUid', uid);   // "continue as" is for your own id, not a character you borrowed
   history.replaceState(null, '', '?id=' + uid + (keepQS() ? '&' + keepQS() : ''));
-  const k = knownSeat(uid), home = k ? k[0] : null, look = startLook(uid);
-  me = { uid, home, look, frames: framesFor_(look), dog: uid === DOG_ID, q: [], seat: null, dir: 'right', walkT: 0, lookTouched: false, lookFromRelay: false };
+  const k = knownSeat(uid), chSeat = ch && ch.kind === 'person' ? deskSeats.find(x => x.code === ch.code) || null : null;
+  const home = k ? k[0] : chSeat;
+  const beast = ch && ch.kind !== 'person' ? ch.kind : null;
+  const look = beast ? null : ch ? (charLook.get(uid) || (chSeat && ROLES[chSeat.role] && ROLES[chSeat.role].look) || randomLook()) : startLook(uid);
+  if (look && ch && !look.sex) look.sex = SEX_STYLES.f.includes(look.style) ? 'f' : 'm';
+  me = { uid, home, look, frames: beast ? beastFrames(ch) : framesFor_(look), dog: uid === DOG_ID, char: ch, beast, q: [], seat: null, dir: 'right', walkT: 0, lookTouched: false, lookFromRelay: false };
   // Everyone starts at the entrance: if the office says your character is already in (a 'where' from the relay),
   // you jump to wherever it is; if not, it just walks in the door and it's yours right away (no walk to your desk first).
   Object.assign(me, { tx: 0, ty: 25, dir: 'right' });
   me.px = me.tx * C8; me.py = me.ty * C8;
-  $('who').textContent = me.dog ? "Woof! You're the office dog" : (k ? 'User ' : 'New person ') + uid;
-  $('sitBtn').setAttribute('aria-label', me.dog ? 'Bark' : 'Sit or stand');
-  $('talkBtn').classList.toggle('hidden', !!me.dog);   // the dog has its Woof button instead
+  $('who').textContent = ch ? "You're " + ch.name : me.dog ? "Woof! You're the office dog" : (k ? 'User ' : 'New person ') + uid;
+  $('sitBtn').setAttribute('aria-label', me.dog ? 'Bark' : beast ? BEAST_SOUND[beast] : 'Sit or stand');
+  $('talkBtn').classList.toggle('hidden', !!(me.dog || beast));   // the dog (and the animals) have their sound button instead
   const act = myAction();   // an extra button only for ids with an action (ACTIONS in gm-office.html)
   $('actBtn').classList.toggle('hidden', !act);
   if (act) { $('actBtn').textContent = act.label; $('actBtn').setAttribute('aria-label', act.label); }
-  $('hint').textContent = me.dog ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to woof' : 'Tap or hold the arrows · keyboard: arrows / WASD, Space to sit, T to talk' + (act ? ', ' + act.key.toUpperCase() + ' to ' + (act.hint || act.label.toLowerCase()) : '');
+  $('hint').textContent = beast ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to ' + BEAST_SOUND[beast].toLowerCase() : me.dog ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to woof' : 'Tap or hold the arrows · keyboard: arrows / WASD, Space to sit, T to talk' + (act ? ', ' + act.key.toUpperCase() + ' to ' + (act.hint || act.label.toLowerCase()) : '');
   $('pick').classList.add('hidden'); $('play').classList.remove('hidden');
   buildLooksUI(); updateWhere();
   relay.stop = false; relayConnect();
@@ -282,7 +298,7 @@ function unpress(dir) { held = held.filter(d => d !== dir); }
 function queueStep(dir) {
   if (me.q.length >= 2) return;   // taps can queue one step ahead, no more
   const [ax, ay] = me.q.length ? me.q[me.q.length - 1] : [me.tx, me.ty], nx = ax + DIRV[dir][0], ny = ay + DIRV[dir][1];
-  if (dir === 'down' && !me.q.length && me.tx === WC_DOOR[0] && me.ty === WC_DOOR[1]) {   // into the washroom (it's below the door): secret trivia
+  if (dir === 'down' && !me.q.length && !me.beast && me.tx === WC_DOOR[0] && me.ty === WC_DOOR[1]) {   // into the washroom (it's below the door): secret trivia
     me.dir = 'down'; me.seat = null; send({ t: 'step', x: me.tx, y: me.ty, dir: 'down', sit: false });
     send({ t: 'hide', on: true });   // gone from the office while they play
     openTrivia(); return;
@@ -294,7 +310,7 @@ function queueStep(dir) {
   }
 }
 function talk() {   // the office picks one of your lines (yours, else your group's) and your character says it
-  if (!me || me.dog) return;
+  if (!me || me.dog || me.beast) return;
   if (send({ t: 'talk' })) flashWhere('Talking...');
 }
 // your id's action (ACTIONS, shared from gm-office.html): the leading screen plays it for everyone
@@ -308,6 +324,7 @@ function doAction() {
 }
 function sitOrStand() {
   if (me && me.dog) { send({ t: 'bark' }); flashWhere('Woof!'); return; }   // dogs don't sit in chairs: they bark
+  if (me && me.beast) { send({ t: 'bark' }); flashWhere(BEAST_SOUND[me.beast] + '!'); return; }   // nor do the animals: their sound
   if (!me || me.q.length) return;
   if (me.seat) { me.seat = null; send({ t: 'step', x: me.tx, y: me.ty, dir: me.dir, sit: false }); updateWhere(); return; }
   for (const d of [me.dir, ...Object.keys(DIRV).filter(d => d !== me.dir)]) {   // the seat you're facing first
@@ -358,9 +375,10 @@ function renderAvatar(t) {
   const g2 = c.getContext('2d'); g2.clearRect(0, 0, W, H); g2.imageSmoothingEnabled = false;
   if (T.open) return;   // in the washroom (trivia): not in the office
   const F = me.frames, walking = me.q.length > 0;
-  if (me.dog) {   // 11 x 7 art px: drawn bigger than a person so it fills the stage
-    const f = F[me.dir + (walking && Math.floor(me.walkT * 10) % 2 ? 'B' : 'A')];
-    const a = f.art || 1, fw = f.width / a, fh = f.height / a, S = Math.max(2, Math.floor(Math.min(W / 14, H / 16) / (me.clone ? 2 : 1)));
+  if (me.dog || me.beast) {   // the dog (11 x 7 art px) drawn bigger than a person so it fills the stage; the turkey / reindeer to fit
+    const f = F[me.dir + (walking && Math.floor(me.walkT * (me.beast === 'reindeer' ? 6 : 10)) % 2 ? 'B' : 'A')];
+    const a = f.art || 1, fw = f.width / a, fh = f.height / a;
+    const S = Math.max(2, Math.floor((me.dog || me.beast === 'dog' ? Math.min(W / 14, H / 16) : Math.min(W / (fw + 4), H / (fh + 7))) / (me.clone ? 2 : 1)));
     const x = Math.round((W - fw * S) / 2), y = Math.round(H * 0.8 - fh * S) - (!walking && ((t / 700) | 0) % 2 ? S / 2 : 0);   // idle: a little pant
     g2.fillStyle = 'rgba(40,20,8,0.25)';
     g2.beginPath(); g2.ellipse(W / 2, H * 0.8, fw * S * 0.45, 1.6 * S, 0, 0, Math.PI * 2); g2.fill();
@@ -411,6 +429,12 @@ const DOG_COLLARS = ['#d9453b', '#3b6fd6', '#22b573', '#ec8f2b', '#f472b6'];
 function buildLooksUI() {
   const L = me.look, root = $('looks');
   root.innerHTML = '';
+  if (me.char) {   // someone with no user id, or an animal: they keep their own look
+    const n = document.createElement('p'); n.className = 'lbl';
+    n.textContent = 'You are driving ' + me.char.name + '. Their look stays as it is.';
+    root.appendChild(n);
+    return;
+  }
   if (me.dog) {   // a dog only picks a coat and a collar
     const row = (title, cols, key, none) => {
       const l = document.createElement('div'); l.className = 'lbl'; l.textContent = title; root.appendChild(l);
@@ -477,7 +501,7 @@ function lookChanged() {
   lookT = setTimeout(sendLook, 400);   // one save after you stop clicking
 }
 function sendLook() {
-  if (!me) return;
+  if (!me || me.char) return;
   if (send({ t: 'look', look: me.look })) $('saved').textContent = 'Saved. It shows on the TV.';
   else $('saved').textContent = 'Not connected yet; it saves as soon as you are.';
   me.lookPending = !relay.ok;
@@ -509,7 +533,7 @@ function relayConnect() {
       me.clone = !!m.clone;
       if (me.clone && !me.started) {   // a clone comes in through the entrance
         Object.assign(me, { tx: 0, ty: 25, seat: null, dir: 'right', q: [] }); me.px = 0; me.py = 25 * C8;
-        $('who').textContent = 'User ' + me.uid + ' - already in the office, you must be an evil clone...';
+        $('who').textContent = me.char ? 'Someone else is already driving ' + me.char.name + '. Switch person to pick someone else.' : 'User ' + me.uid + ' - already in the office, you must be an evil clone...';
         updateWhere(); startHello();
       }
       return;
@@ -524,11 +548,11 @@ function relayConnect() {
     }
     if (m.t !== 'state' || !me) return;
     if (m.trivia) todayBest = m.trivia;
-    const saved = m.looks && m.looks[me.uid];
+    const saved = !me.char && m.looks && m.looks[me.uid];
     if (saved && !me.lookTouched && !!saved.dog === me.dog) {
       me.look = me.dog ? Object.assign({}, saved) : Object.assign({ hat: null, beard: false, goatee: false, glasses: false, build: null, sex: 'm' }, saved);
       me.frames = framesFor_(me.look); buildLooksUI();
-    } else if (!saved && !me.home && !me.lookTouched) sendLook();   // someone new: their starting look is what the TV shows
+    } else if (!saved && !me.home && !me.lookTouched && !me.char) sendLook();   // someone new: their starting look is what the TV shows
   };
   ws.onclose = () => {
     relay.ok = false; relay.ws = null; setStatus();
@@ -543,6 +567,9 @@ function startHello() {   // tell the office where we are (once per connection)
 }
 function relayHangUp() { relay.stop = true; if (relay.ws) relay.ws.close(); relay.ws = null; relay.ok = false; }
 setInterval(() => send({ t: 'hb' }), 20000);   // still here (the TV lets go of a silent driver after 75 s)
+// leaving the page (closed, reloaded, another site): hang up now, so the office hears 'bye' at once instead of waiting
+// out the 75 s; switching apps isn't leaving (that's the visibility timer below)
+addEventListener('pagehide', () => { try { if (relay.ws) relay.ws.close(1000); } catch (e) {} try { if (aim.ws) aim.ws.close(1000); } catch (e) {} });
 // in the background for a minute = away: hang up so your character goes back to its routine; back = walk in again
 document.addEventListener('visibilitychange', () => {
   clearTimeout(relay.hideT);
@@ -711,7 +738,7 @@ async function openAim() {
   try { await v.play(); } catch (e) {}
   try {
     const ws = new WebSocket(RELAY_URL + '?v=2'); aim.ws = ws;
-    ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (er) { return; } if (m && m.t === 'picked' && aim.H) setPicked(m.uid); };
+    ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (er) { return; } if (m && m.t === 'picked' && aim.H) { if (m.uid && m.look && charOf_(m.uid)) charLook.set(m.uid, m.look); setPicked(m.uid); } };
   } catch (e) {}
   $('aimMsg').textContent = 'Fill the picture with the TV (all of it). Looking for the 4 square rugs…';
   const next = () => { if (!aim.on) return; try { aimTick(); } catch (e) { console.warn(e); } aim.loop = setTimeout(next, 120); };   // one frame at a time (slow phones)
@@ -724,11 +751,12 @@ function closeAim() {
   aim.stream = null; $('aimVideo').srcObject = null;
   $('aim').classList.add('hidden');
 }
+const pickName = uid => { const ch = charOf_(uid); return ch ? ch.name : uid === DOG_ID ? 'the office dog' : uid; };   // a name for someone with no user id
 function setPicked(uid) {
   aim.uid = uid || null;
   $('aimTake').disabled = !aim.uid;
-  $('aimTake').textContent = aim.uid ? 'Take control of ' + aim.uid : 'Take control';
-  if (aim.H) $('aimMsg').textContent = aim.uid ? (knownSeat(aim.uid) ? 'User ' : 'Person ') + aim.uid + ' is under the crosshair.' : 'Found the TV. Move the crosshair onto someone.';
+  $('aimTake').textContent = aim.uid ? 'Take control of ' + pickName(aim.uid) : 'Take control';
+  if (aim.H) $('aimMsg').textContent = aim.uid ? (charOf_(aim.uid) ? pickName(aim.uid) : (knownSeat(aim.uid) ? 'User ' : 'Person ') + aim.uid) + ' is under the crosshair.' : 'Found the TV. Move the crosshair onto someone.';
 }
 // the video's picture inside the box (object-fit: contain): scale and offset, in CSS px
 function videoRect() {
@@ -779,7 +807,7 @@ function drawAim() {
     g.moveTo(x - 24, y); g.lineTo(x - 6, y); g.moveTo(x + 6, y); g.lineTo(x + 24, y); g.moveTo(x, y - 24); g.lineTo(x, y - 6); g.moveTo(x, y + 6); g.lineTo(x, y + 24);
     g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.stroke();
     g.lineWidth = 2; g.strokeStyle = col; g.stroke();
-    if (aim.uid) { g.font = '600 15px system-ui, sans-serif'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.strokeText(aim.uid, x, y - 30); g.fillStyle = '#fff'; g.fillText(aim.uid, x, y - 30); }
+    if (aim.uid) { const nm = pickName(aim.uid); g.font = '600 15px system-ui, sans-serif'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.strokeText(nm, x, y - 30); g.fillStyle = '#fff'; g.fillText(nm, x, y - 30); }
   }
 }
 // QR-style finder squares: dark / light / dark / light / dark runs in a 1:1:3:1:1 ratio, across a row and down a
@@ -817,7 +845,7 @@ function findMarks(img, w, h) {
     while (y < h && B(x, y) && st[4] <= max) { st[4]++; y++; }
     if (y >= h || st[3] > max || st[4] > max) return NaN;
     const t2 = st[0] + st[1] + st[2] + st[3] + st[4];
-    if (Math.abs(t2 - tot) * 5 >= tot * 2 || !ok(st)) return NaN;
+    if (t2 < tot * 0.45 || t2 > tot * 1.6 || !ok(st)) return NaN;   // down can be shorter: the CFO's rug is a runner
     return y - st[4] - st[3] - st[2] / 2;
   }
   const cands = [];
@@ -839,25 +867,56 @@ function findMarks(img, w, h) {
     if (g) { g.x = (g.x * g.n + x) / (g.n + 1); g.y = (g.y * g.n + y) / (g.n + 1); g.m = (g.m * g.n + m) / (g.n + 1); g.n++; }
     else cl.push({ x, y, m, n: 1 });
   }
-  // the rugs are by far the biggest squares on the TV (the office's secret QR art has small ones): take the 4 biggest
-  const best = cl.filter(c => c.n >= 3).sort((a, b) => b.m - a.m).slice(0, 4);
-  if (best.length < 4) return null;
-  const by = f => best.slice().sort((a, b) => f(a) - f(b));
-  const tl = by(c => c.x + c.y)[0], br = by(c => -(c.x + c.y))[0], tr = by(c => c.y - c.x)[0], bl = by(c => c.x - c.y)[0];
-  if (new Set([tl, tr, bl, br]).size < 4) return null;
-  // sanity check (a wrong find would pick the wrong person): similar sizes, and the same shape as the rugs' layout
-  const ms = best.map(c => c.m); if (Math.max(...ms) > 2 * Math.min(...ms)) return null;
-  const D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y), E = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  const want = (E(AIM_MARKS[0], AIM_MARKS[1]) + E(AIM_MARKS[2], AIM_MARKS[3])) / (E(AIM_MARKS[0], AIM_MARKS[2]) + E(AIM_MARKS[1], AIM_MARKS[3]));
-  const got = (D(tl, tr) + D(bl, br)) / (D(tl, bl) + D(tr, br));
-  if (got < want / 2 || got > want * 2) return null;
-  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x), ring = [tl, tr, br, bl];   // convex, same turn all round
-  const turns = ring.map((p, i) => Math.sign(cross(p, ring[(i + 1) % 4], ring[(i + 2) % 4])));
-  if (!turns.every(t => t === turns[0] && t !== 0)) return null;
-  // the rug size should fit the spacing: rugs are 9 modules, about 1/9 of the gap between left and right
-  const gapMods = E(AIM_MARKS[0], AIM_MARKS[1]) / AIM_MOD, seen = D(tl, tr) / ((tl.m + tr.m) / 2);
-  if (seen < gapMods / 2 || seen > gapMods * 2) return null;
-  return [tl, tr, bl, br].map(c => [c.x, c.y]);
+  // Which squares are the rugs? The office has other square-ish shapes (and the secret QR art has small finder eyes),
+  // and someone may be standing on a rug. So: among the likeliest squares, try every set of 4, and every set of 3
+  // with the 4th worked out from them, and keep the set that best fits the rugs' layout (an affine fit: position,
+  // size, turn, slant, and each square's size against the spacing). Nothing fits well enough = nothing found, rather
+  // than picking the wrong person.
+  const C = cl.filter(c => c.n >= 3).sort((a, b) => b.n - a.n).slice(0, 9);
+  if (C.length < 3) return null;
+  const M = AIM_MARKS, span = Math.hypot(M[1][0] - M[0][0], M[1][1] - M[0][1]);
+  const det3 = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const solve3 = (A, v) => { const D = det3(A); if (Math.abs(D) < 1e-9) return null; return [0, 1, 2].map(k => det3(A.map((row, r) => row.map((x, c) => c === k ? v[r] : x))) / D); };
+  function affine(src, dst) {   // least squares: office px -> picture px
+    const N = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], bu = [0, 0, 0], bv = [0, 0, 0];
+    src.forEach(([x, y], i) => { const r = [x, y, 1]; for (let p = 0; p < 3; p++) { for (let q = 0; q < 3; q++) N[p][q] += r[p] * r[q]; bu[p] += r[p] * dst[i][0]; bv[p] += r[p] * dst[i][1]; } });
+    const U = solve3(N, bu), V = solve3(N, bv);
+    return U && V ? [U, V] : null;
+  }
+  const ap = (T, [x, y]) => [T[0][0] * x + T[0][1] * y + T[0][2], T[1][0] * x + T[1][1] * y + T[1][2]];
+  function score(ids, cs) {
+    const T = affine(ids.map(i => M[i]), cs.map(c => [c.x, c.y]));
+    if (!T) return null;
+    const ax = [T[0][0], T[1][0]], ay = [T[0][1], T[1][1]], sx = Math.hypot(ax[0], ax[1]), sy = Math.hypot(ay[0], ay[1]);
+    if (ax[0] * ay[1] - ax[1] * ay[0] <= 0) return null;              // mirrored
+    if (Math.abs(Math.atan2(ax[1], ax[0])) > 0.7) return null;        // turned more than ~40 degrees
+    if (sy / sx < 0.5 || sy / sx > 1.8) return null;                  // squashed
+    if (Math.abs((ax[0] * ay[0] + ax[1] * ay[1]) / (sx * sy)) > 0.45) return null;   // slanted
+    let err = 0;
+    for (const c of cs) { const r = c.m / (AIM_MOD * sx); if (r < 0.6 || r > 1.65) return null; err += Math.abs(Math.log(r)) / cs.length; }   // square size vs spacing
+    if (cs.length === 4) {   // perspective bends a 4-rug fit a little; much more and it isn't the rugs
+      let res = 0; ids.forEach((i, k) => { const [u, v] = ap(T, M[i]); res += Math.hypot(u - cs[k].x, v - cs[k].y); });
+      res /= 4 * span * sx; if (res > 0.12) return null; err += res;
+    } else err += 0.3;   // 3 rugs are fine, but a good set of 4 wins
+    return { err, T };
+  }
+  let best = null;
+  const keep = (ids, cs) => { const r = score(ids, cs); if (r && (!best || r.err < best.err)) best = { err: r.err, T: r.T, ids, cs }; };
+  const nc = C.length;
+  for (let a = 0; a < nc; a++) for (let b = a + 1; b < nc; b++) for (let c = b + 1; c < nc; c++) {
+    const tri = [C[a], C[b], C[c]];
+    for (let d = c + 1; d < nc; d++) {   // 4: corners by position (top-left has the smallest x + y, and so on)
+      const q = [...tri, C[d]], by = f => q.slice().sort((u, v) => f(u) - f(v))[0];
+      const tl = by(o => o.x + o.y), br = by(o => -(o.x + o.y)), tr = by(o => o.y - o.x), bl = by(o => o.x - o.y);
+      if (new Set([tl, tr, bl, br]).size === 4) keep([0, 1, 2, 3], [tl, tr, bl, br]);
+    }
+    for (let miss = 0; miss < 4; miss++) {   // 3: which rug is hidden, and which square is which
+      const ids = [0, 1, 2, 3].filter(i => i !== miss);
+      for (const pm of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) keep(ids, pm.map(i => tri[i]));
+    }
+  }
+  if (!best) return null;
+  return [0, 1, 2, 3].map(i => { const j = best.ids.indexOf(i); return j >= 0 ? [best.cs[j].x, best.cs[j].y] : ap(best.T, M[i]); });
 }
 // the 3x3 homography taking 4 picture points to 4 office points (solved as 8 linear equations), and applying it
 function homography(src, dst) {
@@ -889,7 +948,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (!me) return;
   walk(dt);
-  $('sitBtn').textContent = me.dog ? 'Woof' : me.seat ? 'Stand' : 'Sit';
+  $('sitBtn').textContent = me.dog ? 'Woof' : me.beast ? BEAST_SOUND[me.beast] : me.seat ? 'Stand' : 'Sit';
   renderAvatar(now);
 }
 try {

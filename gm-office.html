@@ -99,8 +99,9 @@ const C8 = 8, GX = 48, GY = 28;          // 8px grid cells; x 0-5 is the entranc
 // squares (cream fringe, dark band, cream band, dark centre: 1:1:3:1:1), centred on these office px spots (top-left,
 // top-right, bottom-left, bottom-right). The phone finds them in its picture, so it knows which office spot is under
 // its crosshair, on any size of screen. In the CFO's office, the conference room, the entrance, beside the lunch area.
-const AIM_MARKS = [[84, 47], [364, 36], [64, 196], [348, 180]];
+const AIM_MARKS = [[80.5, 46], [364, 36], [64, 196], [348, 180]];
 const AIM_MOD = 3;   // rug pattern module, office px: each rug is 9 modules (27 px) including the fringe
+const AIM_MOD_Y = [2, 3, 3, 3];   // ...across; down, the CFO's is a runner (2 px modules, 18 px): only that much floor between his desk and the glass
 const WALK = 30;                          // px per second
 const OUT = params.get('style') === 'classic' ? '#1a1c3a' : '#33251f';   // outline: warm dark brown (cozy style); classic = navy
 
@@ -905,6 +906,25 @@ const ACTIONS = {
   2210: [{ id: 'food', label: 'Food', key: 'e', hint: 'call a food delivery' }],   // the courier comes in with a bag (courierPending)
   2350: [{ id: 'dogs', label: 'Dogs', key: 'e', hint: 'call or send home the dogs', lines: ['I miss my dogs', 'Time for doggo nap time'] }],   // summon the poodles / send them home
 };
+// Characters with no user id (TJ 2026-11-27): anyone can take them over from gm-user.html by pointing the camera at
+// the TV. Each gets a character id (never typed, never shown) so the relay and the office drive them like anyone:
+// 80000NN = the desk deskSeats[NN] when it has no user id, 8000099 = HR, 8100001 = the reindeer, 81001NN = turkeys[NN],
+// 81002NN = the poodles. The phone shows the name. Looks can't be changed. Names from TJ; the rest are role + seat
+// number until he names them.
+const CHAR_NAMES = { cfo: 'Bill', coo: 'Shireen', ceo: 'Mike', hr: 'HR' };
+const CHAR_TAG = { am: 'AM', intern: 'Intern', buyer: 'Buyer' };
+const CHARS = {};
+deskSeats.forEach((st, i) => {
+  if (KNOWN[st.code] && KNOWN[st.code].some(p => p.uid)) return;
+  const num = (st.code.match(/(\d+)$/) || [])[1];
+  CHARS['80000' + String(i).padStart(2, '0')] = { kind: 'person', code: st.code, name: CHAR_NAMES[st.code] || (CHAR_TAG[st.role] || st.role) + (num ? '#' + num : '') };
+});
+CHARS['8000099'] = { kind: 'person', code: 'hr', name: CHAR_NAMES.hr };
+CHARS['8100001'] = { kind: 'reindeer', name: 'Reindeer' };
+for (let k = 0; k < 12; k++) CHARS['81001' + String(k).padStart(2, '0')] = { kind: 'turkey', k, name: k ? 'Turkey #' + (k + 1) : 'Turkey' };
+CHARS['8100200'] = { kind: 'dog', k: 0, name: 'Lucy', coat: ['#f6f4ee', '#d4d0c6'] };      // the white poodle
+CHARS['8100201'] = { kind: 'dog', k: 1, name: 'Rhubarb', coat: ['#8a5a32', '#6b4126'] };   // the brown one
+const charOf_ = uid => CHARS[String(uid)] || null;
 // @shared-end
 function makeWorker_(seat, i, role, lazyLook) {
   role = role || seat.role;
@@ -1494,6 +1514,7 @@ function drawDog(d) {
 // A big live turkey (nearly as tall as a person, much bigger than the poodles) struts in from the hallway once every
 // half hour, at a random time in it, wanders around the office gobbling now and then, and leaves. Any hour of the day.
 // Click it and it gobbles. ?turkey=1 sends one in right away (any month), ?turkey=0 turns it off.
+// @shared-begin: gm-user.html loads the code between these markers (people + office layout), keep it page-agnostic
 // F fan, r fan stripe, f fan tips, B body, b body shade, w wing, H head, e eye, y beak, R wattle, L legs
 const TURKEY_R_A = [
   '.ffff.........',
@@ -1531,6 +1552,7 @@ const TURKEY_U_A = TURKEY_D_A.map((r, j) => j >= 3 && j <= 5 ? 'fFrFrFrrFrFrFf' 
 const TURKEY_U_B = TURKEY_U_A.map((r, j) => j === 13 ? '....LL...L....' : r);
 const TURKEY_PAL = { F: '#6b3f22', r: '#b0602e', f: '#e2c48e', B: '#7a4a2a', b: '#5a341c', w: '#a0703e', H: '#a9bccb', e: '#1a1214', y: '#e8b33a', R: '#d23a2e', L: '#d98a3a' };
 const GOBBLE = ['Gobble gobble!', 'Gobble!', 'Gobble gobble gobble!'];
+// @shared-end
 const TURKEY_ON = params.has('turkey') ? params.get('turkey') !== '0' : zoneDay_().key.split('-')[1] === '11';
 let turkeyPending = params.get('turkey') === '1';
 const newTurkey_ = () => ({ present: false, hidden: false, px: 0, py: 0, tx: -1, ty: -1, dir: 'right', walkT: 0, pose: 'stand', bubble: null, headX: 0, headTop: 0 });
@@ -1627,6 +1649,7 @@ function drawTurkey(t) {
 // an hour, at a random time in the first 40 minutes, walks around the office for a few minutes and leaves. Any hour.
 // Its nose twinkles, and glows red in the dark. Click it and it answers. ?reindeer=1 sends one in right away (any
 // month), ?reindeer=0 turns it off.
+// @shared-begin: gm-user.html loads the code between these markers (people + office layout), keep it page-agnostic
 // A front antler, a back antler, B body, b body shade, c muzzle / chest, e eye, N nose, n nose shine, R collar, Y bell,
 // T tail, l far legs, H hooves
 const DEER_R_A = [
@@ -1683,6 +1706,7 @@ const DEER_U_A = DEER_D_A.map((r, j) => j === 7 ? '.....BBBBBB.....' : j === 9 |
 const DEER_U_B = DEER_U_A.map((r, j) => j === 21 ? '....Bl.....H....' : j === 22 ? '....HH..........' : r);
 const DEER_PAL = { A: '#d8bd8c', a: '#9c7c52', B: '#8b5a33', b: '#5e3b20', c: '#dcc09a', e: '#1a1214', N: '#e3201c', n: '#ff6a58', R: '#c22a2a', Y: '#f2c43c', T: '#f2ebe0', l: '#6a4226', H: '#2e1e14' };
 const REINDEER_LINES = ['Jingle jingle!', 'Merry Christmas!', 'Snort!', 'Happy holidays!', 'Has anyone seen Santa?', 'Anyone got a carrot?'];
+// @shared-end
 const REINDEER_ON = params.has('reindeer') ? params.get('reindeer') !== '0' : zoneDay_().key.split('-')[1] === '12';
 let reindeerPending = params.get('reindeer') === '1';
 const reindeer = newTurkey_();   // same bits as a turkey: where it is, which way it faces, its speech anchor
@@ -2350,16 +2374,16 @@ function buildLayers() {
   // entrance mat
   R(2, 25 * C8 + 2, 12, 12, '#5a4a3a'); for (let k = 0; k < 4; k++) R(4 + k * 3, 25 * C8 + 4, 1, 8, '#6f5a46');
   // the four pattern rugs (point-and-pick markers, see AIM_MARKS): a dark walnut / cream medallion design
-  for (const [cx, cy] of AIM_MARKS) {
-    const m = AIM_MOD, x0 = cx - 4.5 * m, y0 = cy - 4.5 * m, dk = '#4a2f24', dk2 = '#56382b', lt = '#efe3cf', lt2 = '#e4d5bd';
-    R(x0, y0, 9 * m, 9 * m, lt); R(x0 + m / 2, y0 + m / 2, 8 * m, 8 * m, lt2); R(x0 + m / 2 + 1, y0 + m / 2 + 1, 8 * m - 2, 8 * m - 2, lt);   // fringe, with a faint stitched line
-    R(x0 + m, y0 + m, 7 * m, 7 * m, dk);
-    R(x0 + 2 * m, y0 + 2 * m, 5 * m, 5 * m, lt);
-    R(x0 + 3 * m, y0 + 3 * m, 3 * m, 3 * m, dk);
-    P(x0 + 4.5 * m, y0 + 3 * m + 1, dk2); P(x0 + 4.5 * m, y0 + 6 * m - 2, dk2); P(x0 + 3 * m + 1, y0 + 4.5 * m, dk2); P(x0 + 6 * m - 2, y0 + 4.5 * m, dk2);   // a little diamond in the medallion
-    for (let k = 1; k < 7; k += 2) { P(x0 + m + k * m + 1, y0 + m + 1, dk2); P(x0 + m + k * m + 1, y0 + 8 * m - 2, dk2); }   // border dots
-    for (let k = 1; k < 9 * m; k += 3) { P(x0 + k, y0 - 1, lt2); P(x0 + k, y0 + 9 * m, lt2); }   // tassels top and bottom
-  }
+  AIM_MARKS.forEach(([cx, cy], i) => {
+    const m = AIM_MOD, n = AIM_MOD_Y[i], x0 = cx - 4.5 * m, y0 = cy - 4.5 * n, dk = '#4a2f24', dk2 = '#56382b', lt = '#efe3cf', lt2 = '#e4d5bd';
+    R(x0, y0, 9 * m, 9 * n, lt); R(x0 + m / 2, y0 + n / 2, 8 * m, 8 * n, lt2); R(x0 + m / 2 + 1, y0 + n / 2 + 1, 8 * m - 2, 8 * n - 2, lt);   // fringe, with a faint stitched line
+    R(x0 + m, y0 + n, 7 * m, 7 * n, dk);
+    R(x0 + 2 * m, y0 + 2 * n, 5 * m, 5 * n, lt);
+    R(x0 + 3 * m, y0 + 3 * n, 3 * m, 3 * n, dk);
+    P(x0 + 4.5 * m, y0 + 3 * n + 1, dk2); P(x0 + 4.5 * m, y0 + 6 * n - 2, dk2); P(x0 + 3 * m + 1, y0 + 4.5 * n, dk2); P(x0 + 6 * m - 2, y0 + 4.5 * n, dk2);   // a little diamond in the medallion
+    for (let k = 1; k < 7; k += 2) { P(x0 + m + k * m + 1, y0 + n + 1, dk2); P(x0 + m + k * m + 1, y0 + 8 * n - 2, dk2); }   // border dots
+    for (let k = 1; k < 9 * m; k += 3) { P(x0 + k, y0 - 1, lt2); P(x0 + k, y0 + 9 * n, lt2); }   // tassels top and bottom
+  });
   // soft shadows under furniture
   const sh = 'rgba(40,20,10,0.18)';
   if (CLASSIC) {
@@ -2535,15 +2559,22 @@ function drawWindowsCached_() {
   g.drawImage(c.cv, 0, 0, c.cv.width, c.cv.height, c.x0, c.y0, c.w, c.h);
   if (night < 0.95) for (const win of WINDOWS) lights.push({ x: win.x + win.w / 2, y: 6, r: 22, a: (1 - night) * 0.8 });   // every frame, as before
 }
-// who's at office px (x, y)? The person (with a user id) whose body is nearest, within about a cell and a half
+// who's at office px (x, y)? Of everyone whose sprite is under it (about a cell and a half from its middle; two for
+// the big reindeer), the one whose middle is nearest, so a small poodle beside the reindeer can still be picked.
+// Their user id, or their character id if they have none.
 function pickAt_(x, y) {
-  let best = null, bd = 13;
-  for (const w of workers) {
-    if (!w.present || w.hidden || !w.v || !w.v.uid || w.px < 0) continue;
-    const d = Math.hypot(w.px + 4 - x, w.py - 2 - y);   // the middle of the sprite (it stands on its cell, head above)
-    if (d < bd) { bd = d; best = w; }
-  }
-  return best ? baseUid_(best.v.uid) : null;
+  let best = null, bd = Infinity;
+  const near = (e, dy, r) => {
+    if (!e.present || e.hidden || e.px < 0) return;
+    const d = Math.hypot(e.px + 4 - x, e.py + dy - y);
+    if (d < r && d < bd) { bd = d; best = e; }
+  };
+  for (const w of workers) near(w, -2, 13);
+  for (const d of dogs) near(d, 3, 11);
+  for (const t of turkeys) near(t, -1, 13);
+  near(reindeer, -5, 18);
+  if (!best) return null;
+  return best.v && best.v.uid ? baseUid_(best.v.uid) : charIdOf_(best);
 }
 // live Eastern time (frozen only when ?hour= is used), 12-hour like 3:16 (no am/pm); the colon blinks every second.
 // Drawn on the screen canvas after the scene, in a system font, so it's sharp and readable across the room.
@@ -3532,6 +3563,7 @@ function step(dt) {
   else {
     for (const c of cos) if (!(c.w && c.w.ctl)) c.tick();
     for (const w of workers) if (w.ctl) { drive_(w, dt); cfoWatch_(w); }
+    for (const e of BEASTS_()) if (e.ctl) drive_(e, dt);   // animals someone's driving (gm-user.html)
     for (const w of workers) placeWatch_(w);
     janitorStep_(dt);
   }
@@ -3555,12 +3587,75 @@ const RELAY_URL = params.get('relay') === '0' ? null : (params.get('relay') || '
 const MANUAL_WALK = 48;   // px per second when driven: a bit brisker than the idle stroll (gm-user.html walks at the same speed)
 const MAX_VISITORS = 12;  // new people (ids we don't know) in the office at once
 const looks = {};         // uid -> look someone picked on gm-user.html
-function workerOf_(uid) {   // [worker, variant] for a user id, or null
+function workerOf_(uid) {   // [worker, variant] for a user id (or a character id: someone with no user id), or null
   for (const w of workers) { const v = w.variants.find(v => v.uid && String(v.uid) === String(uid)); if (v) return [w, v]; }
+  const ch = charOf_(uid);
+  if (ch && ch.kind === 'person') { const w = workers.find(o => o.sid === ch.code && !o.visitor && !o.variants.some(v => v.uid)); if (w) return [w, w.v]; }
   return null;
+}
+// the character id of someone with no user id (or an animal), for point-and-pick
+let charIdsBy_ = null;
+function charIdOf_(e) {
+  if (!charIdsBy_) { charIdsBy_ = {}; for (const [id, c] of Object.entries(CHARS)) charIdsBy_[c.kind === 'person' ? 'p:' + c.code : c.kind + ':' + (c.k || 0)] = id; }
+  if (e === reindeer) return charIdsBy_['reindeer:0'];
+  if (turkeys.includes(e)) return charIdsBy_['turkey:' + turkeys.indexOf(e)] || null;
+  if (dogs.includes(e)) return charIdsBy_['dog:' + dogs.indexOf(e)] || null;
+  if (workers.includes(e) && !e.visitor && !e.variants.some(v => v.uid)) return charIdsBy_['p:' + e.sid] || null;
+  return null;
+}
+// An animal someone's driving: { e, co (its coroutine in extraCos), life, lines } for a character id, or null
+function beastOf_(uid) {
+  const ch = charOf_(uid);
+  if (!ch) return null;
+  if (ch.kind === 'reindeer') return { e: reindeer, co: 'reindeer', life: reindeerLife, lines: REINDEER_LINES };
+  if (ch.kind === 'turkey' && turkeys[ch.k]) { const t = turkeys[ch.k], k = ch.k; return { e: t, co: k ? 'turkey' + k : 'turkey', life: k ? () => flockLife(t, k) : turkeyLife, lines: GOBBLE }; }
+  if (ch.kind === 'dog' && dogs[ch.k]) { const d = dogs[ch.k], o = dogs[1 - ch.k]; return { e: d, co: 'dog' + ch.k, life: () => dogLife(d, o), lines: [WOOF] }; }
+  return null;
+}
+const BEASTS_ = () => [reindeer, ...turkeys, ...dogs];
+function beastRelay_(b, m) {   // hello / step / hb / bye / bark for an animal (like the worker code below, minus chairs)
+  const e = b.e, co = extraCos[b.co];
+  if (m.t === 'bye') { beastRelease_(b); return; }
+  if (m.t === 'bark') { if (e.present && e.px >= 0) say_(e, pick(b.lines), 2.5, true); return; }
+  if (m.t !== 'hello' && m.t !== 'step' && m.t !== 'hb') return;
+  if (!e.ctl) {
+    if (e === reindeer) reindeerFrames_(); else if (turkeys.includes(e)) turkeyFrames_();
+    const enter = !e.present || e.tx < 0;   // not in the office (or still in the hallway): it comes in through the door
+    if (enter) Object.assign(e, { present: true, px: e.present && e.px < 0 ? e.px : hallX(), py: 25 * C8, tx: 0, ty: 25, dir: 'right' });
+    Object.assign(e, { pose: 'stand', glide: null, dismiss: false, follow: false });
+    e.ctl = { q: [], dir: e.dir, seen: Date.now(), enter, walkIn: 0 };
+    if (co) co.w = e;   // its own routine pauses while someone drives it
+  }
+  const c = e.ctl;
+  c.seen = Date.now();
+  if (m.t === 'hb') return;
+  c.dir = m.dir || c.dir;
+  const [ax, ay] = c.q.length ? c.q[c.q.length - 1] : [e.tx, e.ty];
+  if (ax === m.x && ay === m.y) { if (!c.q.length) e.dir = c.dir; return; }
+  const path = bfs(ax, ay, m.x, m.y);
+  if (!path || (path.length > 30 && !c.enter)) { c.q = []; c.enter = false; c.walkIn = 0; Object.assign(e, { px: m.x * C8, py: m.y * C8, tx: m.x, ty: m.y, dir: c.dir, pose: 'stand' }); return; }
+  for (const [x, y] of path) c.q.push([x, y]);
+  if (c.enter) c.walkIn = c.q.length;
+}
+function beastRelease_(b) {   // let go: it walks out, then carries on with its own routine (comes back on its own schedule)
+  const e = b.e, co = extraCos[b.co];
+  if (!e.ctl) return;
+  e.ctl = null;
+  if (!co) return;
+  co.w = null;
+  co.restart(() => (function* () {
+    if (e.present) {
+      const row = chance(0.5) ? 25 : 26;
+      if (e.tx >= 0) yield* walkTo(e, 0, row, 30);
+      yield* walkStraight(e, hallX(), row * C8, 30);
+    }
+    e.present = false; e.tx = -1; e.ty = -1;
+    yield* b.life();
+  })());
 }
 const seatAt_ = (x, y) => SEATS.find(s => s.x === x && s.y === y);
 function applyLook_(uid, look) {
+  if (charOf_(baseUid_(uid))) return;   // characters keep their own look
   if (!look || !!look.dog !== (baseUid_(uid) === DOG_ID)) return;   // only 101 (and its clones) is a dog, and 101 is always one
   looks[uid] = look;
   const hit = workerOf_(uid);
@@ -3679,15 +3774,22 @@ function onRelay_(m) {
   if (m.t === 'act') { if (syncMode !== 'follow') doAction_(m.uid, m.a); return; }   // an ACTIONS button on gm-user.html
   if (m.t === 'whereq') {   // someone opened their id on gm-user.html: where is their character right now?
     if (syncMode === 'lead') {
+      const b = beastOf_(m.uid);
+      if (b) { const e = b.e, here = !!(e.present && e.tx >= 0 && e.px >= 0); relaySend_({ t: 'where', uid: String(m.uid), x: here ? e.tx : 0, y: here ? e.ty : 0, dir: e.dir, sit: false, present: here }); return; }
       const hit = workerOf_(m.uid), w = hit && hit[0];
-      const here = !!(w && w.present && w.tx >= 0 && String(w.v.uid) === String(m.uid));   // shared seat: only if it's their turn
+      const here = !!(w && w.present && w.tx >= 0 && (String(w.v.uid) === String(m.uid) || charIdOf_(w) === String(m.uid)));   // shared seat: only if it's their turn
       relaySend_({ t: 'where', uid: String(m.uid), x: here ? w.tx : 0, y: here ? w.ty : 0, dir: here ? w.dir : 'down', sit: here && w.seated, present: here });
     }
     return;
   }
   if (m.t === 'poke') { if (syncMode !== 'follow') { const w = whoAt_(m.i); if (w && w.present && !w.hidden) poke_(w); } return; }
   if (m.t === 'trivia') { triviaBest = m; return; }
-  if (m.t === 'pick') { if (syncMode !== 'follow' && typeof m.r === 'string') relaySend_({ t: 'picked', r: m.r, uid: pickAt_(+m.x, +m.y) }); return; }
+  if (m.t === 'pick') {   // point-and-pick: who's under that phone's crosshair (and, for someone with no user id, their look for the phone)
+    if (syncMode === 'follow' || typeof m.r !== 'string') return;
+    const uid = pickAt_(+m.x, +m.y), ch = uid && charOf_(uid), hit = ch && ch.kind === 'person' ? workerOf_(uid) : null;
+    relaySend_({ t: 'picked', r: m.r, uid, look: hit ? hit[0].look : undefined });
+    return;
+  }
   if (m.t === 'state') {   // (re)connected: everyone's looks, and exactly these people are driving right now
     if (m.trivia) triviaBest = m.trivia;
     for (const [uid, look] of Object.entries(m.looks || {})) applyLook_(uid, look);
@@ -3703,7 +3805,10 @@ function onRelay_(m) {
   if (m.t === 'look') { applyLook_(m.uid, m.look); return; }
   if (syncMode === 'follow') return;   // steps from gm-user.html: the leader moves them, and we get its snapshots
   if (!['hello', 'step', 'hb', 'bye', 'bark', 'hide'].includes(m.t)) return;   // anything else (a newer message type) isn't a step
+  const beast = beastOf_(m.uid);
+  if (beast) { beastRelay_(beast, m); return; }
   let hit = workerOf_(m.uid);
+  if (!hit && charOf_(baseUid_(m.uid))) return;   // a character id we can't find, or a second phone on one: nobody to drive
   if (m.t === 'bark') { if (hit && hit[0].isDog && hit[0].present) say_(hit[0], WOOF, 2, true); return; }   // the Woof button on 101's page
   if (m.t === 'hide') { if (hit && hit[0].ctl) { hit[0].hidden = !!m.on; if (!m.on) hit[0].dir = 'up'; } return; }   // in the washroom (trivia) / back out at its door
   if (m.t === 'bye') { if (hit) release_(hit[0]); return; }
@@ -3741,6 +3846,7 @@ setInterval(() => {
   if (relay.ok) try { relay.ws.send('ping'); } catch (e) {}
   const now = Date.now();
   for (const w of workers) if (w.ctl && now - w.ctl.seen > 75000) release_(w);
+  for (const [id, ch] of Object.entries(CHARS)) { if (ch.kind === 'person') continue; const b = beastOf_(id); if (b && b.e.ctl && now - b.e.ctl.seen > 75000) beastRelease_(b); }
 }, 20000);
 
 // ---------------------------------------------------------------- one office on every screen
@@ -3930,6 +4036,8 @@ function takeCharge_() {
   dogs.forEach(d => { d.present = false; d.glide = null; });
   turkeys.forEach(t => { t.present = false; t.glide = null; });
   reindeer.present = false; reindeer.glide = null;
+  for (const e of BEASTS_()) e.ctl = null;
+  for (const k in extraCos) extraCos[k].w = null;
   courier.present = false; courier.glide = null;
   waterGuy.present = false; waterGuy.glide = null; waterGuy.jug = false; SPOTS.water.spots[0].busy = null;
   janitor.glide = null; janitor.asking = false; if (janitor.px < 0) janitor.present = false;   // in the doorway: he's gone
