@@ -692,8 +692,8 @@ $('againBtn').addEventListener('click', () => startAs(store.get('gmOfficeUid')))
 $('switchBtn').addEventListener('click', showPick);
 
 // ---- point the camera at the TV and pick someone
-// The phone joins the relay as a plain viewer and sends 'aim' every few seconds: every office screen then draws 4
-// QR-style finder squares at AIM_MARKS (office px). We find those squares in the camera picture (1:1:3:1:1 dark/light
+// The phone joins the relay as a plain viewer. Four rugs on the office floor are patterned like QR finder squares
+// (AIM_MARKS, office px). We find those squares in the camera picture (1:1:3:1:1 dark/light
 // runs across and down, like a QR reader), map the picture to office px through them (a homography), and ask the
 // office who's under the crosshair ('pick'); the leading screen answers 'picked' with their id. Drag (or tap) to move
 // the crosshair. The whole TV has to be in the picture.
@@ -711,16 +711,14 @@ async function openAim() {
   try { await v.play(); } catch (e) {}
   try {
     const ws = new WebSocket(RELAY_URL + '?v=2'); aim.ws = ws;
-    ws.onopen = () => aimSend({ t: 'aim', on: true });
     ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (er) { return; } if (m && m.t === 'picked' && aim.H) setPicked(m.uid); };
   } catch (e) {}
-  aim.ping = setInterval(() => aimSend({ t: 'aim', on: true }), 5000);   // the screens keep their markers up for 12 s after each
-  $('aimMsg').textContent = 'Show the whole TV. Looking for the 4 corner squares…';
-  aim.loop = setInterval(aimTick, 120);
+  $('aimMsg').textContent = 'Fill the picture with the TV (all of it). Looking for the 4 square rugs…';
+  const next = () => { if (!aim.on) return; try { aimTick(); } catch (e) { console.warn(e); } aim.loop = setTimeout(next, 120); };   // one frame at a time (slow phones)
+  next();
 }
 function closeAim() {
-  aim.on = false; clearInterval(aim.ping); clearInterval(aim.loop);
-  aimSend({ t: 'aim', on: false });
+  aim.on = false; clearTimeout(aim.loop);
   if (aim.ws) { const ws = aim.ws; setTimeout(() => { try { ws.close(); } catch (e) {} }, 200); aim.ws = null; }
   if (aim.stream) aim.stream.getTracks().forEach(t => t.stop());
   aim.stream = null; $('aimVideo').srcObject = null;
@@ -747,7 +745,7 @@ $('aimCanvas').addEventListener('pointermove', e => { if (e.buttons || e.pointer
 function aimTick() {
   const v = $('aimVideo');
   if (!aim.on || !v.videoWidth) return;
-  const vw = v.videoWidth, vh = v.videoHeight, k = Math.min(1, 800 / Math.max(vw, vh)), pw = Math.round(vw * k), ph = Math.round(vh * k);
+  const vw = v.videoWidth, vh = v.videoHeight, k = Math.min(1, 1280 / Math.max(vw, vh)), pw = Math.round(vw * k), ph = Math.round(vh * k);
   if (!aim.proc) aim.proc = document.createElement('canvas');
   const pc = aim.proc; if (pc.width !== pw || pc.height !== ph) { pc.width = pw; pc.height = ph; }
   const cx = pc.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, pw, ph);
@@ -756,7 +754,7 @@ function aimTick() {
   else if (performance.now() - aim.marksAt > 1200) aim.marks = null;   // keep the last find for a moment (a blurry frame)
   if (!aim.cross) aim.cross = [vw / 2, vh / 2];
   aim.H = aim.marks ? homography(aim.marks, AIM_MARKS) : null;
-  if (!aim.H) { if (aim.uid) setPicked(null); $('aimMsg').textContent = 'Show the whole TV. Looking for the 4 corner squares…'; }
+  if (!aim.H) { if (aim.uid) setPicked(null); $('aimMsg').textContent = 'Fill the picture with the TV (all of it). Looking for the 4 square rugs…'; }
   else {
     const [ox, oy] = applyH(aim.H, aim.cross[0], aim.cross[1]), now = performance.now();
     const moved = !aim.sent || Math.hypot(ox - aim.sent[0], oy - aim.sent[1]) > 1.5;
@@ -841,12 +839,24 @@ function findMarks(img, w, h) {
     if (g) { g.x = (g.x * g.n + x) / (g.n + 1); g.y = (g.y * g.n + y) / (g.n + 1); g.m = (g.m * g.n + m) / (g.n + 1); g.n++; }
     else cl.push({ x, y, m, n: 1 });
   }
-  // the markers are by far the biggest squares on the TV (the office's secret QR art has small ones): take the 4 biggest
+  // the rugs are by far the biggest squares on the TV (the office's secret QR art has small ones): take the 4 biggest
   const best = cl.filter(c => c.n >= 3).sort((a, b) => b.m - a.m).slice(0, 4);
   if (best.length < 4) return null;
   const by = f => best.slice().sort((a, b) => f(a) - f(b));
   const tl = by(c => c.x + c.y)[0], br = by(c => -(c.x + c.y))[0], tr = by(c => c.y - c.x)[0], bl = by(c => c.x - c.y)[0];
   if (new Set([tl, tr, bl, br]).size < 4) return null;
+  // sanity check (a wrong find would pick the wrong person): similar sizes, and the same shape as the rugs' layout
+  const ms = best.map(c => c.m); if (Math.max(...ms) > 2 * Math.min(...ms)) return null;
+  const D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y), E = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const want = (E(AIM_MARKS[0], AIM_MARKS[1]) + E(AIM_MARKS[2], AIM_MARKS[3])) / (E(AIM_MARKS[0], AIM_MARKS[2]) + E(AIM_MARKS[1], AIM_MARKS[3]));
+  const got = (D(tl, tr) + D(bl, br)) / (D(tl, bl) + D(tr, br));
+  if (got < want / 2 || got > want * 2) return null;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x), ring = [tl, tr, br, bl];   // convex, same turn all round
+  const turns = ring.map((p, i) => Math.sign(cross(p, ring[(i + 1) % 4], ring[(i + 2) % 4])));
+  if (!turns.every(t => t === turns[0] && t !== 0)) return null;
+  // the rug size should fit the spacing: rugs are 9 modules, about 1/9 of the gap between left and right
+  const gapMods = E(AIM_MARKS[0], AIM_MARKS[1]) / AIM_MOD, seen = D(tl, tr) / ((tl.m + tr.m) / 2);
+  if (seen < gapMods / 2 || seen > gapMods * 2) return null;
   return [tl, tr, bl, br].map(c => [c.x, c.y]);
 }
 // the 3x3 homography taking 4 picture points to 4 office points (solved as 8 linear equations), and applying it
