@@ -87,10 +87,15 @@
   /* phones: thumb-sized buttons; the settings come in 4 tabs (Body / Hair / Face / Clothes) beside the avatar */
   @media (max-width: 599px) {
     .looks { display: block; min-height: 250px; }   /* the tallest tab (Body), so the d-pad doesn't jump when you switch */
+    .looks:has(> .note) { min-height: 0; }
     /* tabs size to their words: 4 in a row, or 2 x 2 when the words don't fit (narrow phone, larger text setting) */
     .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.6em, 1fr)); gap: 4px; margin-bottom: 8px; }
     .tab { min-width: 0; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 2px; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
-    .stage { width: clamp(96px, 26vw, 150px); }   /* a little narrower: more room for the settings */
+    /* the avatar big and centred on top, the settings (or a borrowed character's note) under it (TJ 2026-11-27) */
+    .row1 { flex-direction: column; align-items: center; gap: 10px; }
+    .stage { width: clamp(130px, 38vw, 180px); }
+    .looks { width: 100%; }
+    .looks .note { text-align: center; }
     .tab.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
     .group { display: none; }
     .group.on { display: block; }
@@ -134,6 +139,10 @@
   .trow { display: flex; gap: 8px; }
   .trow .btn { flex: 1; }
   .pad .up { grid-area: 1 / 2; } .pad .left { grid-area: 2 / 1; } .pad .sit { grid-area: 2 / 2; } .pad .right { grid-area: 2 / 3; } .pad .down { grid-area: 3 / 2; } .pad .talk { grid-area: 3 / 3; } .pad .act { grid-area: 3 / 1; }
+  @media (max-width: 599px) and (max-height: 820px) {   /* shorter phones: a slightly smaller avatar and d-pad, so the pad still fits without scrolling */
+    .stage { width: clamp(110px, min(34vw, 19vh), 160px); }
+    .pad { grid-template-columns: repeat(3, 66px); grid-template-rows: repeat(3, 66px); gap: 6px; margin-top: 8px; }
+  }
 </style>
 </head>
 <body>
