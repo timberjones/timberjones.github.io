@@ -57,14 +57,8 @@
   #play { max-width: 720px; margin: 0 auto; }
   .top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }   /* one line: name, status, Switch person top right */
   .who { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 2px 9px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
-  .chip.live .dot { background: var(--live); }
   .top .spacer { flex: 1; }
   .top .btn { padding: 5px 10px; font-size: 0.85rem; flex: none; }
-  .top .chip { flex: none; }
-  .chip.live { padding: 6px; }   /* connected: just the green dot (the words only when it isn't) */
-  #statusText:empty { display: none; }
   .row1 { display: flex; gap: 12px; align-items: flex-start; }
   .stage { position: relative; flex: none; width: clamp(96px, 28vw, 190px); border-radius: 10px; overflow: hidden; border: 1px solid var(--line);
     background: repeating-linear-gradient(0deg, var(--floor) 0 10px, var(--floor2) 10px 12px); }
@@ -174,7 +168,6 @@
 <main id="play" class="hidden">
   <div class="top">
     <span class="who" id="who"></span>
-    <span class="chip" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></span>
     <span class="spacer"></span>
     <button class="btn ghost" id="switchBtn" type="button">Switch person</button>
   </div>
@@ -521,12 +514,7 @@ function sendLook() {
 // ---- the relay
 const relay = { ws: null, ok: false, wait: 1000, stop: false, hideT: 0 };
 function send(m) { if (!relay.ok) return false; try { relay.ws.send(JSON.stringify(m)); return true; } catch (e) { return false; } }
-function setStatus() {
-  const st = $('status'), live = relay.ok;
-  st.classList.toggle('live', live);
-  $('statusText').textContent = live ? '' : relay.stop ? 'Away' : 'Connecting…';
-  st.title = live ? 'Live on the office TV' : $('statusText').textContent; st.setAttribute('aria-label', st.title);
-}
+function setStatus() {}   // (TJ 2026-11-27: no connection status on the page; the character showing on the TV says it all)
 function relayConnect() {
   if (!me || relay.ws || relay.stop) return;
   let ws;
