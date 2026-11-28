@@ -72,6 +72,7 @@
   /* dress up: label | options, one line each */
   .looks { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 8px; align-items: center; }
   .looks .lbl { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; }
+  .looks .note { grid-column: 1 / -1; margin: 0; font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }   /* a character you borrowed: why there's nothing to dress up */
   .opts { display: flex; flex-wrap: wrap; gap: 4px; }
   .sw { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--line); cursor: pointer; padding: 0; }
   .sw.sel { border-color: var(--ink); box-shadow: 0 0 0 2px var(--card) inset; }
@@ -86,8 +87,10 @@
   /* phones: thumb-sized buttons; the settings come in 4 tabs (Body / Hair / Face / Clothes) beside the avatar */
   @media (max-width: 599px) {
     .looks { display: block; min-height: 250px; }   /* the tallest tab (Body), so the d-pad doesn't jump when you switch */
-    .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
-    .tab { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 2px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+    /* tabs size to their words: 4 in a row, or 2 x 2 when the words don't fit (narrow phone, larger text setting) */
+    .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.6em, 1fr)); gap: 4px; margin-bottom: 8px; }
+    .tab { min-width: 0; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 2px; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .stage { width: clamp(96px, 26vw, 150px); }   /* a little narrower: more room for the settings */
     .tab.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
     .group { display: none; }
     .group.on { display: block; }
@@ -433,7 +436,7 @@ function buildLooksUI() {
   const L = me.look, root = $('looks');
   root.innerHTML = '';
   if (me.char) {   // someone with no user id, or an animal: they keep their own look
-    const n = document.createElement('p'); n.className = 'lbl';
+    const n = document.createElement('p'); n.className = 'note';
     n.textContent = 'You are driving ' + me.char.name + '. Their look stays as it is.';
     root.appendChild(n);
     return;
