@@ -3251,7 +3251,7 @@ function lighting() {
   L.globalCompositeOperation = 'source-over'; L.setTransform(SS, 0, 0, SS, 0, 0);
   L.clearRect(0, 0, VW, VH);
   L.fillStyle = `rgba(10,12,40,${outDark})`; L.fillRect(0, 0, VW, VH);
-  const indoor = [[OX + 45, OY - 22, GX * C8 - 42, GY * C8 + 26], [0, OY + 24 * C8 - 11, OX + 48, 4 * C8 + 15]];   // our office + the hallway
+  const indoor = [[OX + 45, OY - 22, GX * C8 - 42, GY * C8 + 26], [0, OY + 24 * C8 - 11, OX + 45, 4 * C8 + 15]];   // our office + the hallway (meeting edge to edge: an overlap got dimmed twice, a dark stripe by the entrance)
   for (const r of indoor) L.clearRect(...r);
   L.fillStyle = `rgba(10,12,40,${inDark})`;
   for (const r of indoor) L.fillRect(...r);
