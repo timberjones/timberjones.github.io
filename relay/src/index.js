@@ -202,7 +202,7 @@ export class Office extends DurableObject {
       const x = Number(m.x), y = Number(m.y), L = this.leader_();
       if (!Number.isFinite(x) || !Number.isFinite(y) || !L || L === ws) return;
       if (!a.pick) { a.pick = Math.random().toString(36).slice(2, 12); ws.serializeAttachment(a); }
-      try { L.send(JSON.stringify({ t: 'pick', x: Math.round(x), y: Math.round(y), r: a.pick })); } catch (e) {}
+      try { L.send(JSON.stringify({ t: 'pick', x: Math.round(x), y: Math.round(y), r: a.pick, tight: !!m.tight })); } catch (e) {}   // tight: the phone saw only 3 markers
     } else if (m.t === 'picked') {
       if (!a.lead || typeof m.r !== 'string') return;
       const uid = typeof m.uid === 'string' && /^\d{1,8}$/.test(m.uid) ? m.uid : null, look = uid ? cleanLook(m.look, uid) : null;   // look: someone with no user id (the phone can't know it)

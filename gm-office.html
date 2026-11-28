@@ -98,13 +98,17 @@ const C8 = 8, GX = 48, GY = 28;          // 8px grid cells; x 0-5 is the entranc
 // Point-and-pick (gm-user.html "Point your camera at the TV"): four markers drawn like QR finder squares (light
 // edge, dark band, light band, dark centre: 1:1:3:1:1) in the office's own wood tones, centred on these office px
 // spots (top-left, top-right, bottom-left, bottom-right). The phone finds them in its picture, so it knows which
-// office spot is under its crosshair, on any size of screen. A runner rug in the CFO's office, an inlay in the middle
-// of the conference table top, a runner at the entrance, an inlay in the dining table (made 4 cells wide for it) (TJ 2026-11-27).
-const AIM_MARKS = [[80.5, 46], [300.5, 36], [22.5, 207], [320, 184]];
-const AIM_KIND = ['rug', 'inlay', 'rug', 'inlay'];
+// office spot is under its crosshair, on any size of screen. A runner rug in the CFO's office; the conference table
+// itself (a thick walnut rim top and bottom, the white top, a dark laptop between a phone and a mug); a rug at the
+// entrance; a round tray with a plant on the dining table (made 4 cells wide for it) (TJ 2026-11-27). Any shape works:
+// the bands only have to be right across and down through the middle. Daytime extras: the three office windows
+// (thick dark mullions either side of a narrow middle pane with a hanging plant in it, the glass light with the sky);
+// after dark they're just not seen, and the phone does with whichever markers it finds (any 3 or more).
+const AIM_MARKS = [[80.5, 46], [288.5, 36], [22.5, 207], [320.5, 184.5], [81.5, -11.5], [153.5, -11.5], [225.5, -11.5]];
+const AIM_KIND = ['rug', 'table', 'rug', 'inlay', 'window', 'window', 'window'];
 const AIM_MOD = 3;   // pattern module across, office px: a rug is 9 modules (27 px) with its fringe; the inlay is 7 (21 px)
-const AIM_MOD_Y = [2, 3, 3, 3];   // ...and down: only the CFO's is a runner (2 px modules): that's all the floor between his desk and the glass
-const AIM_FRINGE = [1, 0, 0.5, 0];   // a rug's light edge, in modules (the entrance one is thin: the hallway is only 26 px deep)
+const AIM_MOD_Y = [2, 3, 3, 3, 2, 2, 2];   // ...and down: only the CFO's is a runner (2 px modules): that's all the floor between his desk and the glass
+const AIM_FRINGE = [1, 0, 0.5, 0, 0, 0, 0];   // a rug's light edge, in modules (the entrance one is thin: the hallway is only 26 px deep)
 const AIM_DARK = '#6a4128', AIM_DARK2 = '#78492e';   // the markers' dark wood   // ...and down: runners (2 px modules) where there's only that much room
 const WALK = 30;                          // px per second
 const OUT = params.get('style') === 'classic' ? '#1a1c3a' : '#33251f';   // outline: warm dark brown (cozy style); classic = navy
@@ -652,7 +656,7 @@ const TABLES = [
   { x0: 6, x1: 6, y0: 4, y1: 6, s: WHITE_DESK },                     // office 1: second desk on the left wall
   { x0: 22, x1: 22, y0: 5, y1: 6, s: WHITE_DESK },                   // office 2: second desk on the right wall
   { x0: 31, x1: 31, y0: 5, y1: 6, s: WHITE_DESK },                   // office 3: second desk on the right wall
-  { x0: 33, x1: 41, y0: 3, y1: 5, s: WHITE_TABLE, inlay: 1 },        // conference table, against the left wall (3 rows tall); its inlay is a point-and-pick marker (AIM_MARKS[1])
+  { x0: 33, x1: 41, y0: 3, y1: 5, s: WHITE_TABLE, laptop: 1 },       // conference table, against the left wall (3 rows tall): with its laptop, a point-and-pick marker (AIM_MARKS[1])
   { x0: 38, x1: 41, y0: 20, y1: 25, s: WHITE_TABLE, inlay: 3 },      // lunch table: 4 cells wide, for its inlay (a point-and-pick marker, AIM_MARKS[3])
   { x0: 47, x1: 47, y0: 19, y1: 22, s: BAR_TABLE },                  // bar table on the right wall (work station); the Christmas tree corner below it
 ];
@@ -2126,7 +2130,7 @@ function drawPumpkin_(x, y, big, cols, carved) {
 const DECOR = [
   [314, 194, true, false, true, 25], [305, 197, false, true, false, 25], [327, 196, false, false, false, 25],   // lunch table, below its inlay (a point-and-pick marker)
   [252, 172, false, false, false, 22],                                                                         // kitchen island
-  [270, 29, true, false, true, 6], [318, 33, false, true, false, 6],                                            // conference table, either side of its inlay
+  [308, 28, true, false, true, 6], [322, 33, false, true, false, 6],                                            // conference table, right of the laptop and mug
   [282, 211, false, false, false, 28], [290, 212, false, true, false, 28], [352, 211, false, false, false, 28],  // bookcases along the bottom wall
   [38, 190, true, false, true, 25], [44, 197, false, false, false, 25],                                         // the entrance, past the runner
 ];
@@ -2453,14 +2457,24 @@ function buildLayers() {
 
   // window frames on top of the sky
   wallFG = canvas(bg.width, bg.height); g = wallFG.getContext('2d', RD); g.translate(BGX, BGY);
-  for (const { x, y, w, h } of WINDOWS) {
+  WINDOWS.forEach(({ x, y, w, h }, wi) => {
     R(x - 2, y - 2, w + 4, h + 4, OUT); g.clearRect(x, y, w, h);
     R(x - 1, y - 1, w + 2, 1, '#2b2f3a'); R(x - 1, y + h, w + 2, 1, '#2b2f3a'); R(x - 1, y, 1, h, '#2b2f3a'); R(x + w, y, 1, h, '#2b2f3a');
+    const mk = AIM_KIND.indexOf('window') + wi;
+    if (AIM_KIND[mk] === 'window') {   // a point-and-pick marker (daytime): three panes, a small hanging plant in the narrow middle one
+      const c = Math.round(AIM_MARKS[mk][0] - 4.5), top = y + 2;   // c: the plant's left edge (9 wide); top: its first row (7 tall)
+      R(x, y + h - 1, w, 1, '#2b2f3a');                                          // a heavier bottom rail (the sill takes the frame's outer line)
+      R(c - 6, y, 3, h, '#2b2f3a'); R(c + 12, y, 3, h, '#2b2f3a');               // thick mullions, a pane's width (3) either side of the plant
+      P(c + 1, y, '#5a5048'); P(c + 7, y, '#5a5048'); P(c + 1, y + 1, '#5a5048'); P(c + 7, y + 1, '#5a5048');   // its hanging cords
+      R(c, top, 9, 3, '#2e5a33'); R(c + 1, top, 7, 1, '#3b6b3e'); P(c + 4, top + 1, '#3b6b3e'); P(c + 2, top + 2, '#264a2b'); P(c + 6, top + 2, '#264a2b');   // leaves
+      R(c, top + 3, 9, 4, '#5a3a26'); R(c, top + 3, 9, 1, '#6e4a32'); R(c + 1, top + 6, 7, 1, '#4a2f20');   // the pot
+      return R(x - 3, y + h + 1, w + 6, 2, '#e3d8c4'), R(x - 3, y + h + 3, w + 6, 1, OUT);
+    }
     const panes = Math.max(2, Math.round(w / 15));
     for (let k = 1; k < panes; k++) R(Math.round(x + k * w / panes), y, 1, h, '#2b2f3a');
     R(x, y + 5, w, 1, '#2b2f3a');
     R(x - 3, y + h + 1, w + 6, 2, '#e3d8c4'); R(x - 3, y + h + 3, w + 6, 1, OUT);
-  }
+  });
   drawSillDecor_();
   bg2 = x2Layer_(bg); wallFG2 = x2Layer_(wallFG);
 }
@@ -2568,10 +2582,11 @@ function drawWindowsCached_() {
 // who's at office px (x, y)? Of everyone whose sprite is under it (about a cell and a half from its middle; two for
 // the big reindeer), the one whose middle is nearest, so a small poodle beside the reindeer can still be picked.
 // Their user id, or their character id if they have none.
-function pickAt_(x, y) {
+function pickAt_(x, y, tight) {   // tight: the phone's fit is rougher (it saw only 3 markers): only someone right under it
   let best = null, bd = Infinity;
   const near = (e, dy, r) => {
     if (!e.present || e.hidden || e.px < 0) return;
+    if (tight) r *= 0.55;
     const d = Math.hypot(e.px + 4 - x, e.py + dy - y);
     if (d < r && d < bd) { bd = d; best = e; }
   };
@@ -2622,6 +2637,40 @@ function drawTableRow(t, r) {   // one row of the table's cached sprite (rows so
   const y0 = r === t.y0 ? r * C8 - 1 : r * C8, y1 = r === t.y1 ? (r + 1) * C8 + 14 : (r + 1) * C8;
   blitCap_(t.cap, x, y0, w, y1 - y0);
 }
+// The conference table as a marker (AIM_MARKS[1]), pixel by pixel. Down through the laptop: the walnut rim (3), white
+// top (4), laptop (10), white top (4), rim (3). Across it: phone (3), white (3), laptop (9), white (3), mug (3). The
+// laptop sits between two chairs, so nothing dark is right above or below it.
+function confTablePx_(t, x, y) {
+  const x0 = t.x0 * C8, x1 = (t.x1 + 1) * C8, y0 = t.y0 * C8, y1 = (t.y1 + 1) * C8, [cx, cy] = AIM_MARKS[t.laptop];
+  if (y < y0 + 3 || y >= y1 - 3 || x < x0 + 3 || x >= x1 - 3)   // the thick walnut edge, lit along the top
+    return y === y0 ? '#8a5a38' : y === y1 - 1 || x === x0 || x === x1 - 1 ? '#553420' : AIM_DARK;
+  const lx = x - (cx - 4.5), ly = y - (cy - 5);   // laptop: 9 x 10, top-left at (lx, ly) = 0
+  if (lx >= 0 && lx < 9 && ly >= 0 && ly < 10) {
+    if (ly === 0) return '#4a505c';                                       // the hinge, catching the light
+    if (lx >= 3 && lx < 6 && ly >= 6 && ly < 9) return '#3e4450';         // trackpad
+    return ly >= 1 && ly < 5 && (lx + ly) % 2 ? '#2b2f38' : '#323741';    // keys / body
+  }
+  if (x >= cx - 10.5 && x < cx - 7.5 && y >= cy - 3 && y < cy + 3) return y === cy - 3 ? '#4a505c' : (x === cx - 9.5 && y === cy + 1 ? '#5a7aa8' : '#2b2f38');   // a phone (a glint of screen)
+  if (x >= cx + 7.5 && x < cx + 10.5 && y >= cy - 3 && y < cy + 2) return y === cy - 3 ? '#8a5a38' : (x === cx + 8.5 && y >= cy - 2 && y < cy + 1 ? '#3b2416' : '#6a4128');   // a mug of coffee
+  return null;
+}
+// The round markers on the tables, pixel by pixel (office px, judged at the pixel's centre): a dark rim, a light ring,
+// a dark middle, in widths 1:1:3 (x the module) from the outside in, which is what the phone looks for.
+// Conference table (AIM_MARKS[1]): a speakerphone, charcoal with a light grey speaker ring and a tiny status light.
+// Dining table (AIM_MARKS[3]): a walnut tray, cream liner, a little dark green plant in the middle.
+function centerpiecePx_(i, x, y) {
+  const [cx, cy] = AIM_MARKS[i], m = AIM_MOD, dx = x + 0.5 - cx, dy = (y + 0.5 - cy) * AIM_MOD / AIM_MOD_Y[i], d = Math.hypot(dx, dy);
+  if (d > 3.5 * m) return null;
+  const phone = false, lit = dx + dy < -1.5 * m;   // light from the top-left windows (the conference table is its own marker now)
+  if (d > 2.5 * m) return phone ? (lit ? '#4e5562' : d > 3.2 * m ? '#2a2e37' : '#3a404c') : (lit ? '#8a5a38' : d > 3.2 * m ? '#553420' : '#6a4128');   // body / tray rim
+  if (d > 1.5 * m) return phone ? ((Math.round(dx) + Math.round(dy)) % 2 ? '#c4c8cf' : '#b8bcc4') : (lit ? '#f2e6cc' : '#e6d4b0');   // speaker grille / tray liner
+  if (phone) {   // the middle: a dark display, two small lights off the centre lines
+    if (Math.round(dx) === 2 && Math.round(dy) === -2) return '#3fbf6a';   // one small status light (off the centre lines)
+    return d < 1.2 ? '#3a404c' : '#2b2f38';
+  }
+  const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;   // the plant: dark leaves, a few a shade lighter
+  return d < 1.5 ? '#3d6e3f' : ['#2e5a33', '#264a2b', '#35633a'][h % 3];
+}
 function drawTableRowRaw_(t, r) {
   // grow = [left, right] extra px: the work islands are drawn a little wider than their grid cells (tighter aisles, like the real office)
   const gl = t.grow ? t.grow[0] : 0, gr = t.grow ? t.grow[1] : 0;
@@ -2632,13 +2681,13 @@ function drawTableRowRaw_(t, r) {
   R(x, y, 1, 8, s.frame); R(x + w - 1, y, 1, 8, s.frame);
   if (first) { R(x, y, w, 1, s.frame); R(x + 1, y + 1, w - 2, 1, '#fbf5ea'); }
   if (t.mid) R(x + gl + C8 + 2, y, C8 - 4, 8, shade(s.top, 0.96));   // centre strip stays over the middle cell
-  if (t.inlay != null) {   // a walnut inlay in the table top (point-and-pick marker): only the part in this row
-    const [cx, cy] = AIM_MARKS[t.inlay], m = AIM_MOD, n = AIM_MOD_Y[t.inlay], ix = cx - 3.5 * m, iy = cy - 3.5 * n;
-    const clip = (rx, ry, rw, rh, c) => { const a = Math.max(ry, y), b = Math.min(ry + rh, y + 8); if (b > a) R(rx, a, rw, b - a, c); };
-    clip(ix, iy, 7 * m, 7 * n, AIM_DARK);
-    clip(ix + m, iy + n, 5 * m, 5 * n, '#e6d6ba');
-    clip(ix + 2 * m, iy + 2 * n, 3 * m, 3 * n, AIM_DARK);
-    clip(ix + 2 * m + 1, iy + 3 * n, 3 * m - 2, 1, AIM_DARK2);   // a grain line in the centre panel
+  if (t.laptop != null) {   // the conference table as a marker: only the part in this row
+    for (let py = y; py < y + 8; py++) for (let px = x; px < x + w; px++) { const c = confTablePx_(t, px, py); if (c) P(px, py, c); }
+  }
+  if (t.inlay != null) {   // the round thing on this table (a point-and-pick marker): only the part in this row
+    const [cx, cy] = AIM_MARKS[t.inlay], r = 3.5 * AIM_MOD;
+    for (let py = Math.max(y, Math.floor(cy - r)); py < Math.min(y + 8, Math.ceil(cy + r)); py++)
+      for (let px = Math.floor(cx - r); px < Math.ceil(cx + r); px++) { const c = centerpiecePx_(t.inlay, px, py); if (c) P(px, py, c); }
   }
   if (t.clutter && !CLASSIC) {   // exec L-desk arm: a paper stack and a pen cup
     R(x + 3, y + 2, 7, 5, OUT); R(x + 4, y + 3, 5, 3, '#ffffff'); R(x + 5, y + 4, 3, 1, '#c8ccd2'); R(x + 4, y + 5, 5, 1, '#e2e4ea');
@@ -3806,7 +3855,7 @@ function onRelay_(m) {
   if (m.t === 'trivia') { triviaBest = m; return; }
   if (m.t === 'pick') {   // point-and-pick: who's under that phone's crosshair (and, for someone with no user id, their look for the phone)
     if (syncMode === 'follow' || typeof m.r !== 'string') return;
-    const uid = pickAt_(+m.x, +m.y), ch = uid && charOf_(uid), hit = ch && ch.kind === 'person' ? workerOf_(uid) : null;
+    const uid = pickAt_(+m.x, +m.y, !!m.tight), ch = uid && charOf_(uid), hit = ch && ch.kind === 'person' ? workerOf_(uid) : null;
     relaySend_({ t: 'picked', r: m.r, uid, look: hit ? hit[0].look : undefined });
     return;
   }

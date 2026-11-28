@@ -779,15 +779,15 @@ function aimTick() {
   const pc = aim.proc; if (pc.width !== pw || pc.height !== ph) { pc.width = pw; pc.height = ph; }
   const cx = pc.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, pw, ph);
   const found = findMarks(cx.getImageData(0, 0, pw, ph), pw, ph);
-  if (found) { aim.marks = found.map(([x, y]) => [x / k, y / k]); aim.marksAt = performance.now(); }
+  if (found) { aim.marks = found.pts.map(([x, y]) => [x / k, y / k]); aim.found = found.found; aim.marksAt = performance.now(); }
   else if (performance.now() - aim.marksAt > 1200) aim.marks = null;   // keep the last find for a moment (a blurry frame)
   if (!aim.cross) aim.cross = [vw / 2, vh / 2];
-  aim.H = aim.marks ? homography(aim.marks, AIM_MARKS) : null;
+  aim.H = aim.marks ? homography(aim.marks.slice(0, 4), AIM_MARKS.slice(0, 4)) : null;   // any 4 of them fix it (they're all on one fit)
   if (!aim.H) { if (aim.uid) setPicked(null); $('aimMsg').textContent = 'Fill the picture with the TV (all of it). Looking for the 4 square rugs…'; }
   else {
     const [ox, oy] = applyH(aim.H, aim.cross[0], aim.cross[1]), now = performance.now();
     const moved = !aim.sent || Math.hypot(ox - aim.sent[0], oy - aim.sent[1]) > 1.5;
-    if ((moved && now - aim.sentAt > 250) || now - aim.sentAt > 1500) { aim.sent = [ox, oy]; aim.sentAt = now; aimSend({ t: 'pick', x: ox, y: oy }); }
+    if ((moved && now - aim.sentAt > 250) || now - aim.sentAt > 1500) { aim.sent = [ox, oy]; aim.sentAt = now; aimSend({ t: 'pick', x: ox, y: oy, tight: (aim.found || []).length < 4 }); }   // only 3 markers: the fit's rougher, so only someone right under the crosshair
     if (!aim.uid) $('aimMsg').textContent = 'Found the TV. Move the crosshair onto someone.';
   }
   drawAim();
@@ -800,7 +800,7 @@ function drawAim() {
   if (aim.marks) {   // the TV outline through the 4 squares (TL, TR, BR, BL)
     g.strokeStyle = '#22b573'; g.lineWidth = 2; g.beginPath();
     [0, 1, 3, 2, 0].forEach((i, n) => { const [x, y] = P(aim.marks[i]); if (n) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke();
-    g.fillStyle = '#22b573'; for (const m of aim.marks) { const [x, y] = P(m); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
+    g.fillStyle = '#22b573'; for (const q of aim.found || []) { const [x, y] = P(aim.marks[q]); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }   // the markers it found
   }
   if (aim.cross) {
     const [x, y] = P(aim.cross), col = aim.uid ? '#22b573' : '#ffffff';
@@ -868,60 +868,119 @@ function findMarks(img, w, h) {
     if (g) { g.x = (g.x * g.n + x) / (g.n + 1); g.y = (g.y * g.n + y) / (g.n + 1); g.m = (g.m * g.n + m) / (g.n + 1); g.n++; }
     else cl.push({ x, y, m, n: 1 });
   }
-  // Which squares are the rugs? The office has other square-ish shapes (and the secret QR art has small finder eyes),
-  // and someone may be standing on a rug. So: among the likeliest squares, try every set of 4, and every set of 3
-  // with the 4th worked out from them, and keep the set that best fits the rugs' layout (an affine fit: position,
-  // size, turn, slant, and each square's size against the spacing). Nothing fits well enough = nothing found, rather
-  // than picking the wrong person.
-  const C = cl.filter(c => c.n >= 3).sort((a, b) => b.n - a.n).slice(0, 9);
+  // Which of the squares are markers, and which marker is each? (The office has other square-ish shapes, the secret QR
+  // has small finder eyes, someone may stand on a rug, and the window markers only show by day.) Try every 3 of the
+  // likeliest squares as every 3 of the markers (an affine fit: position, size, turn, slant, square size vs spacing),
+  // see how many of the other markers then land on a square, refit through all of them (a full perspective fit when
+  // 4 or more), and keep the fit with the most markers. Nothing fits well enough = nothing found (better than picking
+  // the wrong person). Returns where every marker is in the picture (found or worked out), and which were found.
+  const C = cl.filter(c => c.n >= 3).sort((a, b) => b.n - a.n).slice(0, 10);
   if (C.length < 3) return null;
-  const M = AIM_MARKS, span = Math.hypot(M[1][0] - M[0][0], M[1][1] - M[0][1]);
+  const M = AIM_MARKS, NM = M.length;
   const det3 = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-  const solve3 = (A, v) => { const D = det3(A); if (Math.abs(D) < 1e-9) return null; return [0, 1, 2].map(k => det3(A.map((row, r) => row.map((x, c) => c === k ? v[r] : x))) / D); };
-  function affine(src, dst) {   // least squares: office px -> picture px
-    const N = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], bu = [0, 0, 0], bv = [0, 0, 0];
-    src.forEach(([x, y], i) => { const r = [x, y, 1]; for (let p = 0; p < 3; p++) { for (let q = 0; q < 3; q++) N[p][q] += r[p] * r[q]; bu[p] += r[p] * dst[i][0]; bv[p] += r[p] * dst[i][1]; } });
-    const U = solve3(N, bu), V = solve3(N, bv);
-    return U && V ? [U, V] : null;
+  function affine3(src, dst) {   // exact through 3 points: office px -> picture px
+    const A = src.map(([x, y]) => [x, y, 1]), D = det3(A);
+    if (Math.abs(D) < 1e-6) return null;
+    const sol = col => [0, 1, 2].map(k => det3(A.map((row, r) => row.map((v, c) => c === k ? dst[r][col] : v))) / D);
+    return [sol(0), sol(1)];
   }
-  const ap = (T, [x, y]) => [T[0][0] * x + T[0][1] * y + T[0][2], T[1][0] * x + T[1][1] * y + T[1][2]];
-  function score(ids, cs) {
-    const T = affine(ids.map(i => M[i]), cs.map(c => [c.x, c.y]));
-    if (!T) return null;
+  const apA = (T, [x, y]) => [T[0][0] * x + T[0][1] * y + T[0][2], T[1][0] * x + T[1][1] * y + T[1][2]];
+  function plausible(T, cs, strict) {   // does this look like the TV seen by a phone?
     const ax = [T[0][0], T[1][0]], ay = [T[0][1], T[1][1]], sx = Math.hypot(ax[0], ax[1]), sy = Math.hypot(ay[0], ay[1]);
-    if (ax[0] * ay[1] - ax[1] * ay[0] <= 0) return null;              // mirrored
-    if (Math.abs(Math.atan2(ax[1], ax[0])) > 0.7) return null;        // turned more than ~40 degrees
-    if (sy / sx < 0.5 || sy / sx > 1.8) return null;                  // squashed
-    if (Math.abs((ax[0] * ay[0] + ax[1] * ay[1]) / (sx * sy)) > 0.45) return null;   // slanted
-    let err = 0;
-    for (const c of cs) { const r = c.m / (AIM_MOD * sx); if (r < 0.6 || r > 1.65) return null; err += Math.abs(Math.log(r)) / cs.length; }   // square size vs spacing
-    if (cs.length === 4) {   // perspective bends a 4-rug fit a little; much more and it isn't the rugs
-      let res = 0; ids.forEach((i, k) => { const [u, v] = ap(T, M[i]); res += Math.hypot(u - cs[k].x, v - cs[k].y); });
-      res /= 4 * span * sx; if (res > 0.12) return null; err += res;
-    } else {   // 3 markers: no 4th to check the fit against, so only a TV that looks near upright and unstretched counts
-      if (Math.abs(Math.atan2(ax[1], ax[0])) > 0.35 || sy / sx < 0.7 || sy / sx > 1.4 || Math.abs((ax[0] * ay[0] + ax[1] * ay[1]) / (sx * sy)) > 0.2) return null;
-      for (const c of cs) { const r = c.m / (AIM_MOD * sx); if (r < 0.75 || r > 1.35) return null; }
-      err += 0.3;   // fine, but a good set of 4 wins
-    }
-    return { err, T };
+    if (ax[0] * ay[1] - ax[1] * ay[0] <= 0) return 0;                                   // mirrored
+    const turn = Math.abs(Math.atan2(ax[1], ax[0])), asp = sy / sx, skew = Math.abs((ax[0] * ay[0] + ax[1] * ay[1]) / (sx * sy));
+    if (turn > (strict ? 0.35 : 0.7) || asp < (strict ? 0.7 : 0.5) || asp > (strict ? 1.4 : 1.8) || skew > (strict ? 0.2 : 0.45)) return 0;
+    for (const c of cs) { const r = c.m / (AIM_MOD * sx); if (r < (strict ? 0.75 : 0.6) || r > (strict ? 1.35 : 1.65)) return 0; }
+    return sx;
   }
-  let best = null;
-  const keep = (ids, cs) => { const r = score(ids, cs); if (r && (!best || r.err < best.err)) best = { err: r.err, T: r.T, ids, cs }; };
-  const nc = C.length;
+  const hyps = [], seen = new Set();
+  const nc = C.length, perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]], spanOf = sx => Math.hypot(M[1][0] - M[0][0], M[1][1] - M[0][1]) * sx;
   for (let a = 0; a < nc; a++) for (let b = a + 1; b < nc; b++) for (let c = b + 1; c < nc; c++) {
     const tri = [C[a], C[b], C[c]];
-    for (let d = c + 1; d < nc; d++) {   // 4: corners by position (top-left has the smallest x + y, and so on)
-      const q = [...tri, C[d]], by = f => q.slice().sort((u, v) => f(u) - f(v))[0];
-      const tl = by(o => o.x + o.y), br = by(o => -(o.x + o.y)), tr = by(o => o.y - o.x), bl = by(o => o.x - o.y);
-      if (new Set([tl, tr, bl, br]).size === 4) keep([0, 1, 2, 3], [tl, tr, bl, br]);
-    }
-    for (let miss = 0; miss < 4; miss++) {   // 3: which rug is hidden, and which square is which
-      const ids = [0, 1, 2, 3].filter(i => i !== miss);
-      for (const pm of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) keep(ids, pm.map(i => tri[i]));
+    for (let i = 0; i < NM; i++) for (let j = i + 1; j < NM; j++) for (let k = j + 1; k < NM; k++) {
+      const ids = [i, j, k];
+      if (AIM_KIND[i] === 'window' && AIM_KIND[j] === 'window' && AIM_KIND[k] === 'window') continue;   // all in a line: no fit
+      for (const pm of perms) {
+        const cs = pm.map(q => tri[q]), T = affine3(ids.map(q => M[q]), cs.map(o => [o.x, o.y]));
+        if (!T) continue;
+        const sx = plausible(T, cs, false);
+        if (!sx) continue;
+        // the other markers: is there a square where this fit puts each? (loose: the fit ignores perspective; checked below)
+        const tol = Math.max(4, 0.15 * spanOf(sx)), used = new Set(cs), match = ids.map((q, n) => [q, cs[n]]);
+        let miss = 0;
+        for (let q = 0; q < NM; q++) {
+          if (ids.includes(q)) continue;
+          const [u, v] = apA(T, M[q]);
+          let hit = null, hd = tol;
+          for (const o of C) if (!used.has(o)) { const d = Math.hypot(o.x - u, o.y - v); if (d < hd) { const r = o.m / (AIM_MOD * sx); if (r > 0.6 && r < 1.65) { hd = d; hit = o; } } }
+          if (hit) { used.add(hit); match.push([q, hit]); miss += hd / spanOf(sx); }
+        }
+        const key = match.map(([q, o]) => q + ':' + C.indexOf(o)).sort().join(',');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let err = 0; for (const [, o] of match) err += Math.abs(Math.log(o.m / (AIM_MOD * sx)));
+        hyps.push({ match, T, sx, err: err / match.length + (match.length > 3 ? miss / (match.length - 3) : 0.3) });
+      }
     }
   }
-  if (!best) return null;
-  return [0, 1, 2, 3].map(i => { const j = best.ids.indexOf(i); return j >= 0 ? [best.cs[j].x, best.cs[j].y] : ap(best.T, M[i]); });
+  hyps.sort((p, q) => q.match.length - p.match.length || p.err - q.err);
+  for (const h of hyps.slice(0, 40)) { const r = verify(h); if (r) return r; }   // the best guess that holds up
+  return null;
+  function verify(best) {
+    // the windows show together by day and not at all after dark: a lone "window" is something else, so leave it out
+    const lone = m => m.filter(([q]) => AIM_KIND[q] === 'window').length === 1;
+    let match = best.match.slice().sort((p, q) => p[0] - q[0]);
+    if (lone(match)) match = match.filter(([q]) => AIM_KIND[q] !== 'window');
+    if (match.length < 3) return null;
+    const found = match.map(([q]) => q);
+    let map;   // office px -> picture px for every marker
+    if (match.length >= 4) {   // a full perspective fit through all of them, then a careful check
+      let H = homographyLS(match.map(([q]) => M[q]), match.map(([, o]) => [o.x, o.y]));
+      if (!H) return null;
+      const rug = 9 * AIM_MOD * best.sx, at = q => applyH(H, M[q][0], M[q][1]);
+      const taken = new Set(match.map(([, o]) => o)); let more = false;   // with the perspective fit, look again for markers the first guess missed
+      for (let q = 0; q < NM; q++) {
+        if (match.some(([mq]) => mq === q)) continue;
+        const [u, v] = at(q); let hit = null, hd = 0.3 * rug;
+        for (const o of C) if (!taken.has(o)) { const d = Math.hypot(o.x - u, o.y - v); if (d < hd) { hd = d; hit = o; } }
+        if (hit) { taken.add(hit); match.push([q, hit]); found.push(q); more = true; }
+      }
+      if (more && lone(match)) { const w = match.findIndex(([q]) => AIM_KIND[q] === 'window'); found.splice(found.indexOf(match[w][0]), 1); match.splice(w, 1); }
+      if (more) { H = homographyLS(match.map(([q]) => M[q]), match.map(([, o]) => [o.x, o.y])); if (!H) return null; }
+      for (const [q, o] of match) {   // every found marker sits on the fit, and is the size the fit says it should be there
+        const [u, v] = at(q), [u1, v1] = applyH(H, M[q][0] + 1, M[q][1]);
+        if (Math.hypot(u - o.x, v - o.y) > 0.35 * rug) return null;
+        const r = o.m / (AIM_MOD * Math.hypot(u1 - u, v1 - v)); if (r < 0.6 || r > 1.6) return null;
+      }
+      const cor = [[0, -22], [GX * C8, -22], [GX * C8, GY * C8], [0, GY * C8]].map(([x, y]) => applyH(H, x, y));   // the office comes out a believable TV
+      for (let i = 0; i < 4; i++) {
+        const a = cor[(i + 3) % 4], b = cor[i], c = cor[(i + 1) % 4], ux = a[0] - b[0], uy = a[1] - b[1], vx = c[0] - b[0], vy = c[1] - b[1];
+        const ang = Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy))))) * 180 / Math.PI;
+        if (!(ang > 50 && ang < 130) || ux * vy - uy * vx > 0) return null;
+      }
+      map = at;
+    } else {   // only 3: no 4th to check against, so only a TV that looks near upright and unstretched counts
+      if (!plausible(best.T, match.map(([, o]) => o), true)) return null;
+      map = q => apA(best.T, M[q]);
+    }
+    return { pts: M.map((_, q) => map(q)), found };
+  }
+}
+// least squares homography through 4 or more point pairs (office px -> picture px)
+function homographyLS(src, dst) {
+  const N = Array.from({ length: 8 }, () => new Array(9).fill(0));
+  src.forEach(([x, y], i) => {
+    const [u, v] = dst[i];
+    for (const r of [[x, y, 1, 0, 0, 0, -u * x, -u * y, u], [0, 0, 0, x, y, 1, -v * x, -v * y, v]])
+      for (let p = 0; p < 8; p++) for (let q = 0; q < 9; q++) N[p][q] += r[p] * r[q];
+  });
+  for (let c = 0; c < 8; c++) {
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(N[r][c]) > Math.abs(N[p][c])) p = r;
+    if (Math.abs(N[p][c]) < 1e-12) return null;
+    [N[c], N[p]] = [N[p], N[c]];
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = N[r][c] / N[c][c]; for (let k = c; k < 9; k++) N[r][k] -= f * N[c][k]; }
+  }
+  return N.map((row, i) => row[8] / row[i]).concat(1);
 }
 // the 3x3 homography taking 4 picture points to 4 office points (solved as 8 linear equations), and applying it
 function homography(src, dst) {
