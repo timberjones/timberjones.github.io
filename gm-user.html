@@ -258,21 +258,21 @@ function startAs(uid) {
   history.replaceState(null, '', '?id=' + uid + (keepQS() ? '&' + keepQS() : ''));
   const k = knownSeat(uid), chSeat = ch && ch.kind === 'person' ? deskSeats.find(x => x.code === ch.code) || null : null;
   const home = k ? k[0] : chSeat;
-  const beast = ch && ch.kind !== 'person' ? ch.kind : null;
-  const look = beast ? null : ch ? (charLook.get(uid) || (chSeat && ROLES[chSeat.role] && ROLES[chSeat.role].look) || randomLook()) : startLook(uid);
+  const jan = !!(ch && ch.kind === 'janitor'), beast = ch && ch.kind !== 'person' && !jan ? ch.kind : null;
+  const look = beast ? null : jan ? Object.assign({ sex: 'm' }, ch.look) : ch ? (charLook.get(uid) || (chSeat && ROLES[chSeat.role] && ROLES[chSeat.role].look) || randomLook()) : startLook(uid);
   if (look && ch && !look.sex) look.sex = SEX_STYLES.f.includes(look.style) ? 'f' : 'm';
-  me = { uid, home, look, frames: beast ? beastFrames(ch) : framesFor_(look), dog: uid === DOG_ID, char: ch, beast, q: [], seat: null, dir: 'right', walkT: 0, lookTouched: false, lookFromRelay: false };
+  me = { uid, home, look, frames: beast ? beastFrames(ch) : framesFor_(look), dog: uid === DOG_ID, char: ch, beast, jan, q: [], seat: null, dir: 'right', walkT: 0, lookTouched: false, lookFromRelay: false };
   // Everyone starts at the entrance: if the office says your character is already in (a 'where' from the relay),
   // you jump to wherever it is; if not, it just walks in the door and it's yours right away (no walk to your desk first).
   Object.assign(me, { tx: 0, ty: 25, dir: 'right' });
   me.px = me.tx * C8; me.py = me.ty * C8;
   $('who').textContent = ch ? "You're " + ch.name : me.dog ? "Woof! You're the office dog" : (k ? 'User ' : 'New person ') + uid;
-  $('sitBtn').setAttribute('aria-label', me.dog ? 'Bark' : beast ? BEAST_SOUND[beast] : 'Sit or stand');
-  $('talkBtn').classList.toggle('hidden', !!(me.dog || beast));   // the dog (and the animals) have their sound button instead
+  $('sitBtn').setAttribute('aria-label', me.dog ? 'Bark' : beast ? BEAST_SOUND[beast] : jan ? 'Sing' : 'Sit or stand');
+  $('talkBtn').classList.toggle('hidden', !!(me.dog || beast || jan));   // the dog (and the animals, and the janitor) have their own button instead
   const act = myAction();   // an extra button only for ids with an action (ACTIONS in gm-office.html)
   $('actBtn').classList.toggle('hidden', !act);
   if (act) { $('actBtn').textContent = act.label; $('actBtn').setAttribute('aria-label', act.label); }
-  $('hint').textContent = beast ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to ' + BEAST_SOUND[beast].toLowerCase() : me.dog ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to woof' : 'Tap or hold the arrows · keyboard: arrows / WASD, Space to sit, T to talk' + (act ? ', ' + act.key.toUpperCase() + ' to ' + (act.hint || act.label.toLowerCase()) : '');
+  $('hint').textContent = jan ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to sing (he mops wherever you stop)' : beast ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to ' + BEAST_SOUND[beast].toLowerCase() : me.dog ? 'Tap or hold the arrows · keyboard: arrows / WASD, Space to woof' : 'Tap or hold the arrows · keyboard: arrows / WASD, Space to sit, T to talk' + (act ? ', ' + act.key.toUpperCase() + ' to ' + (act.hint || act.label.toLowerCase()) : '');
   $('pick').classList.add('hidden'); $('play').classList.remove('hidden');
   buildLooksUI(); updateWhere();
   relay.stop = false; relayConnect();
@@ -310,7 +310,7 @@ function queueStep(dir) {
   }
 }
 function talk() {   // the office picks one of your lines (yours, else your group's) and your character says it
-  if (!me || me.dog || me.beast) return;
+  if (!me || me.dog || me.beast || me.jan) return;
   if (send({ t: 'talk' })) flashWhere('Talking...');
 }
 // your id's action (ACTIONS, shared from gm-office.html): the leading screen plays it for everyone
@@ -325,6 +325,7 @@ function doAction() {
 function sitOrStand() {
   if (me && me.dog) { send({ t: 'bark' }); flashWhere('Woof!'); return; }   // dogs don't sit in chairs: they bark
   if (me && me.beast) { send({ t: 'bark' }); flashWhere(BEAST_SOUND[me.beast] + '!'); return; }   // nor do the animals: their sound
+  if (me && me.jan) { send({ t: 'bark' }); flashWhere('Singing...'); return; }   // the janitor doesn't sit down on the job: he sings
   if (!me || me.q.length) return;
   if (me.seat) { me.seat = null; send({ t: 'step', x: me.tx, y: me.ty, dir: me.dir, sit: false }); updateWhere(); return; }
   for (const d of [me.dir, ...Object.keys(DIRV).filter(d => d !== me.dir)]) {   // the seat you're facing first
@@ -897,7 +898,11 @@ function findMarks(img, w, h) {
     if (cs.length === 4) {   // perspective bends a 4-rug fit a little; much more and it isn't the rugs
       let res = 0; ids.forEach((i, k) => { const [u, v] = ap(T, M[i]); res += Math.hypot(u - cs[k].x, v - cs[k].y); });
       res /= 4 * span * sx; if (res > 0.12) return null; err += res;
-    } else err += 0.3;   // 3 rugs are fine, but a good set of 4 wins
+    } else {   // 3 markers: no 4th to check the fit against, so only a TV that looks near upright and unstretched counts
+      if (Math.abs(Math.atan2(ax[1], ax[0])) > 0.35 || sy / sx < 0.7 || sy / sx > 1.4 || Math.abs((ax[0] * ay[0] + ax[1] * ay[1]) / (sx * sy)) > 0.2) return null;
+      for (const c of cs) { const r = c.m / (AIM_MOD * sx); if (r < 0.75 || r > 1.35) return null; }
+      err += 0.3;   // fine, but a good set of 4 wins
+    }
     return { err, T };
   }
   let best = null;
@@ -948,7 +953,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (!me) return;
   walk(dt);
-  $('sitBtn').textContent = me.dog ? 'Woof' : me.beast ? BEAST_SOUND[me.beast] : me.seat ? 'Stand' : 'Sit';
+  $('sitBtn').textContent = me.dog ? 'Woof' : me.beast ? BEAST_SOUND[me.beast] : me.jan ? 'Sing' : me.seat ? 'Stand' : 'Sit';
   renderAvatar(now);
 }
 try {

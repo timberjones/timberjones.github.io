@@ -95,13 +95,17 @@ const IS_TV = /SMART-TV|SmartTV|Tizen|Web0S|WebOS|NetCast|HbbTV|BRAVIA|AFT[A-Z]|
 try { localStorage.removeItem('gmo-perf'); } catch (e) {}   // left by a short-lived lag guard (Nov 2026); start clean
 const FPS = Math.max(15, Math.min(60, parseInt(params.get('fps')) || (IS_TV ? 24 : 60)));
 const C8 = 8, GX = 48, GY = 28;          // 8px grid cells; x 0-5 is the entrance corridor, x 6-47 the office
-// Point-and-pick (gm-user.html "Point your camera at the TV"): four square rugs on the floor are drawn like QR finder
-// squares (cream fringe, dark band, cream band, dark centre: 1:1:3:1:1), centred on these office px spots (top-left,
-// top-right, bottom-left, bottom-right). The phone finds them in its picture, so it knows which office spot is under
-// its crosshair, on any size of screen. In the CFO's office, the conference room, the entrance, beside the lunch area.
-const AIM_MARKS = [[80.5, 46], [364, 36], [64, 196], [348, 180]];
-const AIM_MOD = 3;   // rug pattern module, office px: each rug is 9 modules (27 px) including the fringe
-const AIM_MOD_Y = [2, 3, 3, 3];   // ...across; down, the CFO's is a runner (2 px modules, 18 px): only that much floor between his desk and the glass
+// Point-and-pick (gm-user.html "Point your camera at the TV"): four markers drawn like QR finder squares (light
+// edge, dark band, light band, dark centre: 1:1:3:1:1) in the office's own wood tones, centred on these office px
+// spots (top-left, top-right, bottom-left, bottom-right). The phone finds them in its picture, so it knows which
+// office spot is under its crosshair, on any size of screen. A runner rug in the CFO's office, an inlay in the middle
+// of the conference table top, a runner at the entrance, an inlay in the dining table (made 4 cells wide for it) (TJ 2026-11-27).
+const AIM_MARKS = [[80.5, 46], [300.5, 36], [22.5, 207], [320, 184]];
+const AIM_KIND = ['rug', 'inlay', 'rug', 'inlay'];
+const AIM_MOD = 3;   // pattern module across, office px: a rug is 9 modules (27 px) with its fringe; the inlay is 7 (21 px)
+const AIM_MOD_Y = [2, 3, 3, 3];   // ...and down: only the CFO's is a runner (2 px modules): that's all the floor between his desk and the glass
+const AIM_FRINGE = [1, 0, 0.5, 0];   // a rug's light edge, in modules (the entrance one is thin: the hallway is only 26 px deep)
+const AIM_DARK = '#6a4128', AIM_DARK2 = '#78492e';   // the markers' dark wood   // ...and down: runners (2 px modules) where there's only that much room
 const WALK = 30;                          // px per second
 const OUT = params.get('style') === 'classic' ? '#1a1c3a' : '#33251f';   // outline: warm dark brown (cozy style); classic = navy
 
@@ -627,7 +631,7 @@ const GLASS_DOORS = [[8, 11], [17, 20], [26, 29], [43, 46]];      // wide slidin
 const DOOR_CELLS = GLASS_DOORS.flatMap(([a, b]) => Array.from({ length: (b - a + 1) / 2 }, (_, i) => a + i));
 const BLOCK = { x0: 16, x1: 26, y0: 21, y1: 27, wall: 20 };        // closet (17-19) | washroom (21-25)
 const ROOM_DOORS = [{ x: 21, kind: 'wc' }];   // the closet has no door: nobody goes in
-const LUNCH_RUG = { x0: 36, y0: 19, x1: 41, y1: 26 };
+const LUNCH_RUG = { x0: 36, y0: 19, x1: 43, y1: 26 };
 blockRect(0, 0, 5, 23);                                            // neighbours, above the corridor
 for (let x = 6; x < GX; x++) if (!DOOR_CELLS.includes(x)) block(x, 8);   // office wall with the glass doors
 for (const x of DIVIDERS) blockRect(x, 0, x, 7);
@@ -648,8 +652,8 @@ const TABLES = [
   { x0: 6, x1: 6, y0: 4, y1: 6, s: WHITE_DESK },                     // office 1: second desk on the left wall
   { x0: 22, x1: 22, y0: 5, y1: 6, s: WHITE_DESK },                   // office 2: second desk on the right wall
   { x0: 31, x1: 31, y0: 5, y1: 6, s: WHITE_DESK },                   // office 3: second desk on the right wall
-  { x0: 33, x1: 41, y0: 3, y1: 5, s: WHITE_TABLE },                  // conference table, against the left wall (3 rows tall)
-  { x0: 38, x1: 39, y0: 20, y1: 25, s: WHITE_TABLE },                // lunch table
+  { x0: 33, x1: 41, y0: 3, y1: 5, s: WHITE_TABLE, inlay: 1 },        // conference table, against the left wall (3 rows tall); its inlay is a point-and-pick marker (AIM_MARKS[1])
+  { x0: 38, x1: 41, y0: 20, y1: 25, s: WHITE_TABLE, inlay: 3 },      // lunch table: 4 cells wide, for its inlay (a point-and-pick marker, AIM_MARKS[3])
   { x0: 47, x1: 47, y0: 19, y1: 22, s: BAR_TABLE },                  // bar table on the right wall (work station); the Christmas tree corner below it
 ];
 for (const t of TABLES) blockRect(t.x0, t.y0, t.x1, t.y1);
@@ -697,8 +701,8 @@ const MEET_SEATS = [
   addSeat(34, 2, 'down', 'meet'), addSeat(34, 6, 'up', 'meet'), addSeat(40, 2, 'down', 'meet'), addSeat(40, 6, 'up', 'meet'),
 ];
 const LUNCH_SEATS = [
-  addSeat(37, 21, 'right', 'lunch'), addSeat(40, 21, 'left', 'lunch'), addSeat(37, 23, 'right', 'lunch'), addSeat(40, 23, 'left', 'lunch'),
-  addSeat(37, 25, 'right', 'lunch'), addSeat(40, 25, 'left', 'lunch'), addSeat(38, 19, 'down', 'lunch'), addSeat(39, 26, 'up', 'lunch'),
+  addSeat(37, 21, 'right', 'lunch'), addSeat(42, 21, 'left', 'lunch'), addSeat(37, 23, 'right', 'lunch'), addSeat(42, 23, 'left', 'lunch'),
+  addSeat(37, 25, 'right', 'lunch'), addSeat(42, 25, 'left', 'lunch'), addSeat(39, 19, 'down', 'lunch'), addSeat(40, 26, 'up', 'lunch'),
 ];
 
 // props: [kind, x, y, w, h] in cells. Pillars 1-2 and 2-3 are joined by thin shelf racks (people can't pass there)
@@ -924,6 +928,7 @@ CHARS['8100001'] = { kind: 'reindeer', name: 'Reindeer' };
 for (let k = 0; k < 12; k++) CHARS['81001' + String(k).padStart(2, '0')] = { kind: 'turkey', k, name: k ? 'Turkey #' + (k + 1) : 'Turkey' };
 CHARS['8100200'] = { kind: 'dog', k: 0, name: 'Lucy', coat: ['#f6f4ee', '#d4d0c6'] };      // the white poodle
 CHARS['8100201'] = { kind: 'dog', k: 1, name: 'Rhubarb', coat: ['#8a5a32', '#6b4126'] };   // the brown one
+CHARS['8100300'] = { kind: 'janitor', name: 'the janitor', look: { hair: '#9aa4b0', skin: 2, shirt: '#4f6d8f', pants: '#3a3f55', style: 'short', beard: true } };   // the night janitor
 const charOf_ = uid => CHARS[String(uid)] || null;
 // @shared-end
 function makeWorker_(seat, i, role, lazyLook) {
@@ -950,7 +955,7 @@ function makeWorker_(seat, i, role, lazyLook) {
   return w;
 }
 const workers = deskSeats.map((seat, i) => makeWorker_(seat, i));   // one person per desk; who comes in depends on the day (see pickRoster)
-const HR_SEATS = [CEO_SIDE_DESK, LUNCH_SEATS.find(s => s.x === 39 && s.y === 26)];   // CEO's second desk, dining table bottom-middle
+const HR_SEATS = [CEO_SIDE_DESK, LUNCH_SEATS.find(s => s.face === 'up')];   // CEO's second desk, dining table bottom-middle
 const hrVisitor = makeWorker_(HR_SEATS[0], workers.length, 'hr');
 workers.push(hrVisitor);
 const floater = makeWorker_({ code: 'floater', x: 0, y: 25, face: 'right', kind: 'door' }, workers.length, 'floater');   // home = whichever free desk she's at
@@ -1904,7 +1909,7 @@ const JANITOR_SONGS = ['Oops!... I did it again', 'Bye bye bye', "It's gonna be 
   'Barbie girl', 'Mr. Brightside', 'Since U been gone', 'Complicated', 'Wonderwall', 'Hmm hmm hmmm...'].map(s => NOTE + ' ' + s + ' ' + NOTE);
 const JANITOR_WHO = ["Hello? Who's there?", "Who's there?", "...Who's there?", "Hm? Who's there?"];
 const JANITOR_SHRUG = ['Huh. Must be the wind.', "Guess it's just me.", 'Just me and the mop, then.', 'Hello...? Okay then.', 'Spooky. Back to work.'];
-const JANITOR_LOOK = { hair: '#9aa4b0', skin: 2, shirt: '#4f6d8f', pants: '#3a3f55', style: 'short', beard: true };
+const JANITOR_LOOK = CHARS['8100300'].look;
 const janitor = { role: 'janitor', talk: 1, present: false, hidden: false, seated: false, headset: false, bag: false,
   phones: true, mop: true, mopping: false, asking: false, leaving: false,
   px: 0, py: 0, tx: -1, ty: -1, dir: 'right', walkT: 0, pose: 'stand', bubble: null, headX: 0, headTop: 0, v: {}, frames: null };
@@ -1953,7 +1958,7 @@ function* janitorShift() {
 // "Who's there?" (gap: seconds since the last time he asked, so a burst of check-ins doesn't keep him at it)
 function janitorAsk_(gap) {
   const J = janitor;
-  if (syncMode === 'follow' || !J.present || J.px < 0 || J.leaving || J.asking || TIME - (J.askT || -1e9) < gap) return;
+  if (syncMode === 'follow' || !J.present || J.px < 0 || J.leaving || J.asking || J.ctl || TIME - (J.askT || -1e9) < gap) return;   // (not while someone drives him)
   J.askT = TIME; J.asking = true;
   extraCos.janitor.restart(() => (function* () { yield* whoThere_(); yield* janitorShift(); })());
 }
@@ -2119,11 +2124,11 @@ function drawPumpkin_(x, y, big, cols, carved) {
 }
 // [x, y (office px, top-left), big, white, carved, sort row]
 const DECOR = [
-  [307, 178, true, false, true, 24], [306, 189, false, true, false, 24], [309, 168, false, false, false, 24],   // lunch table centrepiece
+  [314, 194, true, false, true, 25], [305, 197, false, true, false, 25], [327, 196, false, false, false, 25],   // lunch table, below its inlay (a point-and-pick marker)
   [252, 172, false, false, false, 22],                                                                         // kitchen island
-  [296, 29, true, false, true, 6], [288, 34, false, true, false, 6],                                            // conference table
+  [270, 29, true, false, true, 6], [318, 33, false, true, false, 6],                                            // conference table, either side of its inlay
   [282, 211, false, false, false, 28], [290, 212, false, true, false, 28], [352, 211, false, false, false, 28],  // bookcases along the bottom wall
-  [30, 192, true, false, true, 25], [40, 195, false, false, false, 25],                                         // the entrance, by the door
+  [38, 190, true, false, true, 25], [44, 197, false, false, false, 25],                                         // the entrance, past the runner
 ];
 function addDecor_() {   // into the sorted scene (buildDrawables)
   if (CHRISTMAS) STATIC.push({ key: (TREE_CORNER.y1 + 1) * C8 - 0.25, draw: drawXmasTree_ });
@@ -2371,18 +2376,19 @@ function buildLayers() {
   // rug under the lunch table
   const r = LUNCH_RUG;
   R(r.x0 * C8 + 2, r.y0 * C8 + 2, (r.x1 - r.x0 + 1) * C8 - 4, (r.y1 - r.y0 + 1) * C8 - 4, '#bdb8ae'); R(r.x0 * C8 + 4, r.y0 * C8 + 4, (r.x1 - r.x0 + 1) * C8 - 8, (r.y1 - r.y0 + 1) * C8 - 8, '#cbc6bc');
-  // entrance mat
-  R(2, 25 * C8 + 2, 12, 12, '#5a4a3a'); for (let k = 0; k < 4; k++) R(4 + k * 3, 25 * C8 + 4, 1, 8, '#6f5a46');
-  // the four pattern rugs (point-and-pick markers, see AIM_MARKS): a dark walnut / cream medallion design
+  // the pattern rugs (point-and-pick markers, see AIM_MARKS): a walnut / pale oak medallion design, in the floor's own tones
   AIM_MARKS.forEach(([cx, cy], i) => {
-    const m = AIM_MOD, n = AIM_MOD_Y[i], x0 = cx - 4.5 * m, y0 = cy - 4.5 * n, dk = '#4a2f24', dk2 = '#56382b', lt = '#efe3cf', lt2 = '#e4d5bd';
-    R(x0, y0, 9 * m, 9 * n, lt); R(x0 + m / 2, y0 + n / 2, 8 * m, 8 * n, lt2); R(x0 + m / 2 + 1, y0 + n / 2 + 1, 8 * m - 2, 8 * n - 2, lt);   // fringe, with a faint stitched line
+    if (AIM_KIND[i] !== 'rug') return;
+    const fr = AIM_FRINGE[i], m = AIM_MOD, n = AIM_MOD_Y[i], w = (7 + 2 * fr) * m, h = (7 + 2 * fr) * n, dk = AIM_DARK, dk2 = AIM_DARK2, lt = '#ecdab8', lt2 = '#e0caa2';
+    const ex = cx - w / 2, ey = cy - h / 2, x0 = cx - 4.5 * m, y0 = cy - 4.5 * n;   // x0, y0: where a 1-module fringe would start (the pattern below is laid out from it)
+    R(ex, ey, w, h, lt);
+    if (fr >= 1) { R(x0 + m / 2, y0 + n / 2, 8 * m, 8 * n, lt2); R(x0 + m / 2 + 1, y0 + n / 2 + 1, 8 * m - 2, 8 * n - 2, lt); }   // fringe, with a faint stitched line
     R(x0 + m, y0 + n, 7 * m, 7 * n, dk);
     R(x0 + 2 * m, y0 + 2 * n, 5 * m, 5 * n, lt);
     R(x0 + 3 * m, y0 + 3 * n, 3 * m, 3 * n, dk);
     P(x0 + 4.5 * m, y0 + 3 * n + 1, dk2); P(x0 + 4.5 * m, y0 + 6 * n - 2, dk2); P(x0 + 3 * m + 1, y0 + 4.5 * n, dk2); P(x0 + 6 * m - 2, y0 + 4.5 * n, dk2);   // a little diamond in the medallion
     for (let k = 1; k < 7; k += 2) { P(x0 + m + k * m + 1, y0 + n + 1, dk2); P(x0 + m + k * m + 1, y0 + 8 * n - 2, dk2); }   // border dots
-    for (let k = 1; k < 9 * m; k += 3) { P(x0 + k, y0 - 1, lt2); P(x0 + k, y0 + 9 * n, lt2); }   // tassels top and bottom
+    for (let k = 1; k < w; k += 3) { P(ex + k, ey - 1, lt2); P(ex + k, ey + h, lt2); }   // tassels top and bottom
   });
   // soft shadows under furniture
   const sh = 'rgba(40,20,10,0.18)';
@@ -2573,6 +2579,7 @@ function pickAt_(x, y) {
   for (const d of dogs) near(d, 3, 11);
   for (const t of turkeys) near(t, -1, 13);
   near(reindeer, -5, 18);
+  near(janitor, -2, 13);
   if (!best) return null;
   return best.v && best.v.uid ? baseUid_(best.v.uid) : charIdOf_(best);
 }
@@ -2625,6 +2632,14 @@ function drawTableRowRaw_(t, r) {
   R(x, y, 1, 8, s.frame); R(x + w - 1, y, 1, 8, s.frame);
   if (first) { R(x, y, w, 1, s.frame); R(x + 1, y + 1, w - 2, 1, '#fbf5ea'); }
   if (t.mid) R(x + gl + C8 + 2, y, C8 - 4, 8, shade(s.top, 0.96));   // centre strip stays over the middle cell
+  if (t.inlay != null) {   // a walnut inlay in the table top (point-and-pick marker): only the part in this row
+    const [cx, cy] = AIM_MARKS[t.inlay], m = AIM_MOD, n = AIM_MOD_Y[t.inlay], ix = cx - 3.5 * m, iy = cy - 3.5 * n;
+    const clip = (rx, ry, rw, rh, c) => { const a = Math.max(ry, y), b = Math.min(ry + rh, y + 8); if (b > a) R(rx, a, rw, b - a, c); };
+    clip(ix, iy, 7 * m, 7 * n, AIM_DARK);
+    clip(ix + m, iy + n, 5 * m, 5 * n, '#e6d6ba');
+    clip(ix + 2 * m, iy + 2 * n, 3 * m, 3 * n, AIM_DARK);
+    clip(ix + 2 * m + 1, iy + 3 * n, 3 * m - 2, 1, AIM_DARK2);   // a grain line in the centre panel
+  }
   if (t.clutter && !CLASSIC) {   // exec L-desk arm: a paper stack and a pen cup
     R(x + 3, y + 2, 7, 5, OUT); R(x + 4, y + 3, 5, 3, '#ffffff'); R(x + 5, y + 4, 3, 1, '#c8ccd2'); R(x + 4, y + 5, 5, 1, '#e2e4ea');
     R(x + 13, y + 2, 4, 5, OUT); R(x + 14, y + 3, 2, 3, '#3a3f55'); P(x + 14, y + 2, '#d9453b'); P(x + 15, y + 1, '#3b6fd6');
@@ -2690,6 +2705,8 @@ function drawSeatKit(s) {
   if ((s.kind === 'meet' || s.kind === 'lunch') && s.occ) {
     const off = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] }[s.face];
     const px = (s.x + off[0]) * C8 + 2, py = (s.y + off[1]) * C8 + 2;
+    const onInlay = AIM_MARKS.some(([ix, iy], i) => AIM_KIND[i] === 'inlay' && Math.abs(px + 2 - ix) < 3.5 * AIM_MOD + 4 && Math.abs(py + 1.5 - iy) < 3.5 * AIM_MOD_Y[i] + 3.5);
+    if (onInlay) return;   // nothing on a table's inlay (a point-and-pick marker)
     if (s.kind === 'lunch' && s.occ.role !== 'hr') { box(px, py, 4, 3, '#ffffff'); R(px + 1, py + 1, 2, 1, ['#e9a23a', '#7fd06a', '#d9453b'][s.y % 3]); }
     else { box(px, py, 4, 3, '#9aa4b0'); R(px, py, 4, 1, '#c8ccd2'); }
   }
@@ -2834,13 +2851,13 @@ function drawSecretArt_() {
   const c = mctx;
   c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.imageSmoothingEnabled = false;
   c.fillStyle = 'rgba(40,20,8,0.28)'; c.fillRect(ox, oy + Math.round(scale), outer, outer);   // shadow (straight down: it's on the wall)
-  if (world.hour >= 12 && world.hour < 13) {   // lunch hour: the QR
+  {   // the QR, all day (TJ 2026-11-27; it used to show only over lunch, a storage cabinet the rest of the day)
     c.fillStyle = QR_COL.frame; c.fillRect(ox, oy, outer, outer);                              // frame: desk-edge brown
     c.drawImage(secretArt_(size), x, y);
     const p = size / QR_ALL, blink = (TIME * 1.5 | 0) % 2;   // the eyes' standby lights, in step with the sleeping monitors
     c.fillStyle = blink ? '#f5b93a' : '#5a4a20';
     for (const [ex, ey] of [[0, 0], [QR_N - 7, 0], [0, QR_N - 7]]) { c.beginPath(); c.arc(x + (QR_Q + ex + 4.3) * p, y + (QR_Q + ey + 4.3) * p, 0.32 * p, 0, Math.PI * 2); c.fill(); }
-  } else drawArtCabinet_(c, ox, oy, outer);
+  }
   const art = { x: ox / scale - OX, y: oy / scale - OY, w: outer / scale };   // where it landed, in art px
   const dark = darkAt_(art.x + art.w / 2, art.y + art.w / 2);   // drawn after the lighting: dim it with the room (at night, the townhall)
   if (dark > 0.01) { c.fillStyle = `rgba(10,12,40,${dark.toFixed(3)})`; c.fillRect(ox, oy, outer, outer + Math.round(scale)); }
@@ -3563,7 +3580,7 @@ function step(dt) {
   else {
     for (const c of cos) if (!(c.w && c.w.ctl)) c.tick();
     for (const w of workers) if (w.ctl) { drive_(w, dt); cfoWatch_(w); }
-    for (const e of BEASTS_()) if (e.ctl) drive_(e, dt);   // animals someone's driving (gm-user.html)
+    for (const e of BEASTS_()) if (e.ctl) { drive_(e, dt); if (e === janitor) e.mopping = !e.ctl.q.length && !e.ctl.enter && e.px >= 6 * C8; }   // animals (and the janitor) someone's driving (gm-user.html); he mops wherever he stops
     for (const w of workers) placeWatch_(w);
     janitorStep_(dt);
   }
@@ -3600,6 +3617,7 @@ function charIdOf_(e) {
   if (e === reindeer) return charIdsBy_['reindeer:0'];
   if (turkeys.includes(e)) return charIdsBy_['turkey:' + turkeys.indexOf(e)] || null;
   if (dogs.includes(e)) return charIdsBy_['dog:' + dogs.indexOf(e)] || null;
+  if (e === janitor) return charIdsBy_['janitor:0'];
   if (workers.includes(e) && !e.visitor && !e.variants.some(v => v.uid)) return charIdsBy_['p:' + e.sid] || null;
   return null;
 }
@@ -3610,9 +3628,10 @@ function beastOf_(uid) {
   if (ch.kind === 'reindeer') return { e: reindeer, co: 'reindeer', life: reindeerLife, lines: REINDEER_LINES };
   if (ch.kind === 'turkey' && turkeys[ch.k]) { const t = turkeys[ch.k], k = ch.k; return { e: t, co: k ? 'turkey' + k : 'turkey', life: k ? () => flockLife(t, k) : turkeyLife, lines: GOBBLE }; }
   if (ch.kind === 'dog' && dogs[ch.k]) { const d = dogs[ch.k], o = dogs[1 - ch.k]; return { e: d, co: 'dog' + ch.k, life: () => dogLife(d, o), lines: [WOOF] }; }
+  if (ch.kind === 'janitor') return { e: janitor, co: 'janitor', life: janitorLife, lines: JANITOR_SONGS };
   return null;
 }
-const BEASTS_ = () => [reindeer, ...turkeys, ...dogs];
+const BEASTS_ = () => [reindeer, ...turkeys, ...dogs, janitor];   // driven without a desk or a chair (the janitor too)
 function beastRelay_(b, m) {   // hello / step / hb / bye / bark for an animal (like the worker code below, minus chairs)
   const e = b.e, co = extraCos[b.co];
   if (m.t === 'bye') { beastRelease_(b); return; }
@@ -3620,6 +3639,7 @@ function beastRelay_(b, m) {   // hello / step / hb / bye / bark for an animal (
   if (m.t !== 'hello' && m.t !== 'step' && m.t !== 'hb') return;
   if (!e.ctl) {
     if (e === reindeer) reindeerFrames_(); else if (turkeys.includes(e)) turkeyFrames_();
+    if (e === janitor) Object.assign(e, { frames: e.frames || framesFor_(JANITOR_LOOK), mopping: false, asking: false, leaving: false, phones: true });
     const enter = !e.present || e.tx < 0;   // not in the office (or still in the hallway): it comes in through the door
     if (enter) Object.assign(e, { present: true, px: e.present && e.px < 0 ? e.px : hallX(), py: 25 * C8, tx: 0, ty: 25, dir: 'right' });
     Object.assign(e, { pose: 'stand', glide: null, dismiss: false, follow: false });
