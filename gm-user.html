@@ -349,6 +349,8 @@ function walk(dt) {
   } else {
     me.px += Math.sign(dx) * Math.min(st, Math.abs(dx));
     me.py += Math.sign(dy) * Math.min(st, Math.abs(dy));
+    // still holding the key, nearly there: send the next step a touch early, so the TV always has one queued (no stutter)
+    if (me.q.length === 1 && heldDir() && Math.abs(gx - me.px) + Math.abs(gy - me.py) <= 2) queueStep(heldDir());
   }
 }
 

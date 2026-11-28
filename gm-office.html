@@ -720,6 +720,11 @@ const PROPS = [
 ];
 for (const [, x, y, w, h] of PROPS) blockRect(x, y, x + w - 1, y + h - 1);
 blockRect(12, 17, 30, 17);   // the shelf racks sit right against islands 1-2: no walking between them
+// Desks drawn wider than their cells (grow: the work islands and the wall banks): standing in the free cells along
+// those sides put people half inside the desk edge (TJ 2026-11-27), so they aren't floor. The chairs along there are
+// still reached from the aisle. And the QR art is drawn a little wider than its cells: nobody stands against its left side.
+for (const t of TABLES) if (t.grow) for (const [side, x] of [[0, t.x0 - 1], [1, t.x1 + 1]]) if (t.grow[side] > 0) for (let y = t.y0; y <= t.y1; y++) if (!isSeat[idx(x, y)]) block(x, y);
+blockRect(44, 15, 44, 17);
 
 // spots people walk to; face = which way they look once there
 const SPOTS = {
@@ -3794,10 +3799,15 @@ function drive_(w, dt) {
     if (w.px < 0) return;
     c.enter = false;
   }
-  if (!c.q.length) { if (!w.seated) { w.pose = 'stand'; w.dir = c.dir; } return; }
+  if (!c.q.length) {   // nothing queued: if the next step is just a little late (network), keep the legs going a moment
+    if (!w.seated) { c.idle = (c.idle || 0) + dt; if (c.idle > 0.15 || w.pose !== 'walk') { w.pose = 'stand'; w.dir = c.dir; } else w.walkT += dt; }
+    return;
+  }
+  c.idle = 0;
   const [nx, ny, seat] = c.q[0];
   if (w.seated) standUp(w);
-  const gx = nx * C8, gy = ny * C8, dx = gx - w.px, dy = gy - w.py, st = MANUAL_WALK * (c.q.length - c.walkIn > 3 ? 2 : 1) * dt;
+  const lag = c.q.length - c.walkIn;   // behind the phone: catch up gently, faster only when well behind
+  const gx = nx * C8, gy = ny * C8, dx = gx - w.px, dy = gy - w.py, st = MANUAL_WALK * (lag > 3 ? 2 : lag > 1 ? 1.2 : 1) * dt;
   w.pose = 'walk'; w.walkT += dt;
   if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) w.dir = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
   if (Math.abs(dx) + Math.abs(dy) <= st) {
